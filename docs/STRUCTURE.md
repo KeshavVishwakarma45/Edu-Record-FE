@@ -41,13 +41,17 @@ edu-frontend/
     ├── api/                   the ONLY place that talks to the server
     │   ├── client.js          one axios instance: token + X-Institute-Id, refresh once on 401, error format
     │   ├── auth.js            login, refresh, logout, me
-    │   └── courses.js         ★ EXAMPLE API FILE: list, get, create, update, remove, options
+    │   ├── courses.js         ★ EXAMPLE API FILE: list, get, create, update, remove, options
+│   ├── users.js           users list, invite, change role, links, disable (admin)
+│   ├── roles.js           roles list, create, update, delete (admin)
+│   └── organisation.js    overview, combine preview, combine, separate (Super Admin)
     │
     ├── components/            shared building blocks every page reuses
     │   ├── PageHeader.jsx     title, subtitle, breadcrumbs, action buttons
     │   ├── DataTable.jsx      server-side paging, sort, search; skeleton, empty and error states
     │   ├── FormDialog.jsx     create/edit dialog with React Hook Form; server errors on the fields
     │   ├── ConfirmDialog.jsx  "are you sure?" before deleting
+│   ├── CopyLinkDialog.jsx shows an invite / password link with a Copy button
     │   ├── StatusChip.jsx     document status with its fixed colour
     │   ├── InstituteBadge.jsx coloured SSISM (pink) / SSEC (blue-grey) badge
     │   ├── EmptyState.jsx     "nothing here yet"
@@ -59,17 +63,18 @@ edu-frontend/
     │       ├── FormSelect.jsx
     │       ├── FormNumberField.jsx
     │       ├── FormDateField.jsx   dd/mm/yyyy picker; sends 'YYYY-MM-DD'
-    │       └── FormCheckbox.jsx
+│       ├── FormCheckbox.jsx
+│       └── FormCheckboxGroup.jsx  grouped tick boxes (a role's permissions)
     │
     ├── constants/             ★ identical to the backend repo's copies
-    │   ├── roles.js           7 roles, STAFF_ROLES, COURSE_WRITE_ROLES, ROLE_LABELS
+│   ├── permissions.js     every permission + groups and labels for the Roles screen
     │   ├── statuses.js        document statuses + colours, student statuses
     │   ├── categories.js      GEN, OBC, SC, ST, EWS
     │   ├── coursePatterns.js  semester / year, buildExamTerms()
     │   └── genders.js         Male, Female, Other
     │
     ├── context/
-    │   └── AuthContext.jsx    user, institutes, selected institute (remembered per tab), login, logout
+│   └── AuthContext.jsx    user, institutes, selected institute, role, permissions, can(), login, logout
     │
     ├── hooks/
     │   ├── useAuth.js         read the AuthContext
@@ -80,10 +85,14 @@ edu-frontend/
     ├── layouts/
     │   ├── AppLayout.jsx      sidebar menu (filtered by role), top bar, phone drawer
     │   ├── InstituteSwitcher.jsx  select the institute; only the user's institutes are listed
-    │   └── UserMenu.jsx       name, role, mobile, Log out
+    │   └── UserMenu.jsx       name, role, email, Log out
     │
     ├── pages/
-    │   ├── auth/LoginPage.jsx         mobile + password, show/hide, back to the wanted page
+    │   ├── auth/LoginPage.jsx         email + password, show/hide, back to the wanted page
+│   ├── auth/SetPasswordPage.jsx   opened from an invite / reset link: set password, log in
+│   ├── admin/UsersPage.jsx        staff of the institute or unit: invite, change role, links
+│   ├── admin/RolesPage.jsx        roles made by ticking permissions
+│   ├── admin/OrganisationPage.jsx Super Admin: combine institutes into a unit, or separate
     │   ├── dashboard/DashboardPage.jsx 4 cards (values come later from Modules B and C)
     │   ├── courses/CoursesPage.jsx    ★ EXAMPLE PAGE: list, add, edit, delete; "how to copy" steps on top
     │   └── system/
@@ -92,8 +101,8 @@ edu-frontend/
     │       └── NotFoundPage.jsx       404
     │
     ├── routes/
-    │   ├── routes.jsx         EVERY page: path, element, allowed roles, menu label and icon
-    │   └── ProtectedRoute.jsx not logged in → /login; wrong role → No access
+│   ├── routes.jsx         EVERY page: path, element, permission (or superAdminOnly), menu
+│   └── ProtectedRoute.jsx not logged in → /login; no permission → No access
     │
     ├── theme/
     │   └── index.js           MUI theme (14px, 8px corners, compact tables) + institute colours

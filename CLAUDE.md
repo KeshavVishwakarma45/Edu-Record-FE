@@ -43,16 +43,32 @@ pages/courses/CoursesPage.jsx is the EXAMPLE page every intern copies.
 - API calls only from files in api/ (one file per module); pages never call axios directly.
 - Toasts: notistack via the useNotify hook. No alert() or console.log left in code.
 - Every page starts with PageHeader; every create/edit is a FormDialog; every delete uses ConfirmDialog.
-- Roles, statuses, document types, categories: import from constants/; never hard-code strings.
+- Permissions, statuses, document types, categories: import from constants/; never hard-code strings.
 - Dates: show with formatDate (dd/mm/yyyy, IST) from utils/format.js.
 - Every page must handle 3 states: loading (skeleton), empty (EmptyState), error (ErrorState with retry).
 - Must work at 360 px phone width; tables scroll sideways inside their own box.
 - Every input has a visible label; everything works with the keyboard.
 - File names: components and pages PascalCase.jsx; hooks useSomething.js; api files camelCase.js.
 
-## Roles (constants/roles.js, same values in both repos)
+## Users, roles and permissions (ADR-016, built in the backend)
 
-PLATFORM_ADMIN, SOCIETY_ADMIN, PRINCIPAL, EXAM_CLERK, TC_CLERK, ACCOUNTS, DEPT_INCHARGE
+- The app checks **permissions**, never role names: `const { can } = useAuth(); can(PERMISSIONS.COURSE_WRITE)`.
+  Pages in `routes/routes.jsx` declare `permission` (or `superAdminOnly`); the menu and
+  ProtectedRoute use it. `constants/permissions.js` is the same file in both repos.
+- Roles are made by admins on the Roles page; the user's role name and permissions for the
+  selected institute come from `/auth/me` (`currentRoleName`, `permissions` in useAuth).
+- Institutes are separate or combined in a **unit** (shared roles and staff). The institute switcher
+  shows the unit; records still belong to one institute. A unit role can be used in only some of
+  the unit's institutes ("Used in" on the Roles page; "Roles used in ..." when editing an institute).
+- Admin pages: Users (invite by link, change role, remove access, password link), Roles, and
+  Organisation (Super Admin only: combine / separate).
+- Login is by email + password; invite and reset links open `/set-password/:token`.
+- **"All institutes"** is the Super Admin's default switcher entry (`allInstitutes` in useAuth):
+  lists show every institute (DataTable adds an Institute column and filter by itself), and add
+  forms ask which institute (`realInstitutes`) or institute / unit (`owners`). Every change is
+  sent to one institute: API functions take an optional last `instituteId` argument, passed on
+  with `inInstitute(id)` from api/client.js; pages pass the record's own `instituteId` (see
+  CoursesPage). Admins and staff never see "All institutes".
 
 ## Document statuses (constants/statuses.js)
 
@@ -83,10 +99,11 @@ the menu shows them as "Coming soon" placeholders (routes/routes.jsx).
 
 - MUI is v9: use `slotProps` (not `InputProps` / `inputProps` / `PaperProps`) and `sx`
   (not `mt={2}`-style props). Legacy `*Outline` icons are gone: use `*Outlined`.
-- `src/constants/{roles,statuses,categories,coursePatterns,genders}.js` must stay byte-identical
+- `src/constants/{permissions,statuses,categories,coursePatterns,genders,ownerTypes}.js` must stay byte-identical
   to the backend repo's copies (the backend tests check this). Change both repos together.
 - Calendar dates (date of birth...) are sent to the API as 'YYYY-MM-DD' strings (FormDateField does this).
-- Every request goes through `src/api/client.js`, which adds the token and `X-Institute-Id`.
+- Every request goes through `src/api/client.js`, which adds the token and `X-Institute-Id`
+  (unless the call passed its own with `inInstitute(id)`).
   A page that calls axios itself gets "Select an institute first" errors.
 - A record of another institute answers 404 from the API (never 403): show "not found".
 - The refresh cookie needs Chrome or Edge on localhost; Safari may log you out on every refresh.

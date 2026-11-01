@@ -25,7 +25,7 @@
 
 - [ ] Follows the Courses page pattern: api file, page, route entry in `routes.jsx`
 - [ ] API calls only through `src/api/`; uses DataTable, FormDialog, ConfirmDialog, PageHeader
-- [ ] No hard-coded role, status or category strings (import from `src/constants/`)
+- [ ] Page declares its `permission` in `routes.jsx`; buttons use `can(...)`; no hard-coded role, status or category strings
 - [ ] Page handles loading, empty and error; works at 360 px; every input has a label
 - [ ] Shared constants changed? The same change is in Edu-Record-BE
 - [ ] `npm run lint` and `npm run build` pass

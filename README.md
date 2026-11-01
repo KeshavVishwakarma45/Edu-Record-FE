@@ -54,9 +54,8 @@ edurecords/
 4. Install this repo's packages: `npm install`. Copy the settings file: `cp .env.example .env`.
    `VITE_API_URL` in `.env` points at the API (default `http://localhost:5000/api/v1`; there is no dev proxy).
 5. Start the app: `npm run dev`, then open http://localhost:5173 in Chrome or Edge.
-6. Log in with a seeded user, for example `9000000001` (Society Admin, both institutes) or
-   `9100000003` (SSISM TC Clerk). The password is `Edu@12345` unless the backend's `SEED_PASSWORD`
-   says otherwise. The full login table is in the Edu-Record-BE README and printed by `npm run seed`.
+6. Log in with `superadmin@singaji.in` (Super Admin) or `admin@singaji.in` (Admin). The password is
+   `Edu@12345` unless the backend's `SEED_PASSWORD` says otherwise. The full login table is in the Edu-Record-BE README and printed by `npm run seed`.
 
 ## Scripts
 
@@ -78,12 +77,12 @@ If the commit is refused, run `npm run lint:fix` and `npm run format`, then comm
 | `src/api/`             | `client.js` (the one axios instance) and one file per module, e.g. `courses.js`   |
 | `src/components/`      | Shared pieces: PageHeader, DataTable, FormDialog, ConfirmDialog, StatusChip...    |
 | `src/components/form/` | Form inputs wired to React Hook Form: FormTextField, FormSelect, FormDateField... |
-| `src/constants/`       | Roles, statuses, categories, course patterns, genders (same files as the backend) |
+| `src/constants/`       | Permissions, statuses, categories, course patterns, genders (same as the backend) |
 | `src/context/`         | AuthContext: user, institutes, selected institute, login, logout                  |
 | `src/hooks/`           | useAuth, useList, useRequest, useNotify                                           |
 | `src/layouts/`         | AppLayout: sidebar, top bar, institute switcher, user menu                        |
 | `src/pages/`           | One folder per screen. `pages/courses/CoursesPage.jsx` is the EXAMPLE             |
-| `src/routes/`          | `routes.jsx` (every page + roles + menu) and ProtectedRoute                       |
+| `src/routes/`          | `routes.jsx` (every page + permission + menu) and ProtectedRoute                  |
 | `src/theme/`           | MUI theme and institute badge colours                                             |
 | `src/utils/`           | formatDate, formatDateTime, formatCurrency, getErrorMessage                       |
 
@@ -100,7 +99,8 @@ Edu-Record-BE.
 2. **Page.** Copy `src/pages/courses/CoursesPage.jsx` to `src/pages/<module>/<Module>Page.jsx`
    and rename "course" everywhere. Keep `PageHeader` at the top.
 3. **Route entry.** Add one object to `appRoutes` in `src/routes/routes.jsx`: `path`, `element`,
-   `roles` (from the SRS role table) and `menu: { label, icon }`. The sidebar updates itself.
+   `permission` (e.g. `PERMISSIONS.INWARD_READ`) and `menu: { label, icon }`. Hide buttons with
+   `can(PERMISSIONS.X)` from `useAuth()`. The sidebar updates itself.
    Replace the "Coming soon" placeholder if there is one.
 4. **Table columns.** Change `columns` for `DataTable`. Only mark a column `sortable` if the
    backend's `listQuery([...])` allows that field. Load rows with `useList(yourApi.list)`.
@@ -109,6 +109,16 @@ Edu-Record-BE.
    `useNotify` for success and error toasts.
 6. **Test as the right role.** Log in as a role that should see the page and one that should not.
    Switch institutes. Check it at 360 px width.
+
+## Administration pages
+
+| Page                          | Who                       | What                                                      |
+| ----------------------------- | ------------------------- | --------------------------------------------------------- |
+| Administration → Users        | roles with "Manage users" | Invite by link, change role, remove access, password link |
+| Administration → Roles        | roles with "Manage roles" | Make roles by ticking permissions                         |
+| Administration → Organisation | Super Admin only          | Combine SSISM and SSEC into a unit, or separate them      |
+
+Invite and password links open `/set-password/<token>`, where the person chooses a password.
 
 ## Two rules every page follows
 
@@ -122,7 +132,7 @@ table may scroll sideways, inside its own box (DataTable does this). Dialogs bec
 
 ## Shared constants
 
-`src/constants/{roles,statuses,categories,coursePatterns,genders}.js` must be identical to the
+`src/constants/{permissions,statuses,categories,coursePatterns,genders}.js` must be identical to the
 backend repo's copies. Change both in the same day, in two pull requests. The backend's `npm test`
 checks that they match when this repo is cloned next to it.
 
