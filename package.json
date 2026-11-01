@@ -1,0 +1,45 @@
+{
+  "name": "edurecords",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EduRecords: marksheet, degree and TC tracking portal for Sant Singaji Education Society",
+  "type": "module",
+  "workspaces": [
+    "edu-backend",
+    "edu-frontend"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w edu-backend\" \"npm run dev -w edu-frontend\"",
+    "db:local": "npm run db:local -w edu-backend",
+    "seed": "npm run seed -w edu-backend",
+    "test": "npm test -w edu-backend",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx}": [
+      "eslint --max-warnings=0",
+      "prettier --check"
+    ],
+    "*.{json,md,css,html}": "prettier --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "concurrently": "10.0.6",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.7",
+    "globals": "17.14.0",
+    "husky": "9.1.7",
+    "lint-staged": "16.4.0",
+    "prettier": "3.9.10"
+  }
+}
