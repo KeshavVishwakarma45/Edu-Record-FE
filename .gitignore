@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
 
-# Secrets: never commit these. Copy .env.example to .env instead.
+# Settings: never commit .env. Copy .env.example to .env instead.
 .env
 .env.*
 !.env.example
@@ -9,10 +9,6 @@ node_modules/
 # Build output
 dist/
 coverage/
-
-# Private uploaded files (photos, signatures, scans) and the local dev database
-edu-backend/uploads/
-edu-backend/.local-db/
 
 # Editor and OS files
 .DS_Store

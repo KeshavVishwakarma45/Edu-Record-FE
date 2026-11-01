@@ -1,4 +1,4 @@
-// Shared constants: this file must be IDENTICAL in edu-backend/src/constants and edu-frontend/src/constants.
+// Shared constants: this file must be IDENTICAL in Edu-Record-BE and Edu-Record (src/constants/).
 // A server test fails if the two copies differ, so change both together.
 
 // One document status list for the whole system (SRS HND-01).

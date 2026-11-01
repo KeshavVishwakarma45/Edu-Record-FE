@@ -1,4 +1,4 @@
-// One ESLint config for the whole repo, so server and client follow the same rules.
+// ESLint for the React app. The backend repo (Edu-Record-BE) uses the same shared rules.
 import js from '@eslint/js';
 import globals from 'globals';
 import react from 'eslint-plugin-react';
@@ -7,46 +7,16 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  {
-    ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/coverage/**',
-      'edu-backend/uploads/**',
-      'edu-backend/.local-db/**',
-    ],
-  },
+  { ignores: ['node_modules/**', 'dist/**', 'coverage/**'] },
 
   js.configs.recommended,
 
-  // Rules shared by server and client
   {
     files: ['**/*.{js,jsx}'],
-    languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
-    rules: {
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
-      'prefer-const': 'error',
-      eqeqeq: ['error', 'always'],
-      // console.log is for debugging only; use console.info/warn/error for real messages
-      'no-console': ['error', { allow: ['info', 'warn', 'error', 'table'] }],
-    },
-  },
-
-  // Server (Node.js)
-  {
-    files: ['edu-backend/**/*.js', '*.js'],
-    languageOptions: { globals: globals.node },
-  },
-  {
-    files: ['edu-backend/tests/**/*.js'],
-    languageOptions: { globals: { ...globals.node, ...globals.jest } },
-  },
-
-  // Client (React in the browser)
-  {
-    files: ['edu-frontend/**/*.{js,jsx}'],
     plugins: { react, 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
     languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
@@ -57,12 +27,15 @@ export default [
       ...reactHooks.configs.recommended.rules,
       'react/prop-types': 'off',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      // The client must not leave console output behind (see CLAUDE.md "Frontend rules")
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
+      'prefer-const': 'error',
+      eqeqeq: ['error', 'always'],
+      // No console output left in the app (see CLAUDE.md "Frontend rules")
       'no-console': ['error', { allow: ['error'] }],
     },
   },
   {
-    files: ['edu-frontend/vite.config.js'],
+    files: ['vite.config.js', 'eslint.config.js'],
     languageOptions: { globals: globals.node },
   },
 

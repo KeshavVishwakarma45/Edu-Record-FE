@@ -23,9 +23,9 @@
 
 ## Checklist
 
-- [ ] Follows the courses pattern (backend: 5 files; frontend: api file, page, route entry)
-- [ ] Every protected route runs auth → tenantScope → requireRole → validate → controller
-- [ ] Every query starts from `scoped(req)`; every create/update/delete calls `audit()`
-- [ ] No hard-coded role, status or category strings
+- [ ] Follows the Courses page pattern: api file, page, route entry in `routes.jsx`
+- [ ] API calls only through `src/api/`; uses DataTable, FormDialog, ConfirmDialog, PageHeader
+- [ ] No hard-coded role, status or category strings (import from `src/constants/`)
 - [ ] Page handles loading, empty and error; works at 360 px; every input has a label
-- [ ] `npm run lint` and `npm test` pass
+- [ ] Shared constants changed? The same change is in Edu-Record-BE
+- [ ] `npm run lint` and `npm run build` pass

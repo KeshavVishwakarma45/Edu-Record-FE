@@ -1,4 +1,4 @@
-// Shared constants: this file must be IDENTICAL in edu-backend/src/constants and edu-frontend/src/constants.
+// Shared constants: this file must be IDENTICAL in Edu-Record-BE and Edu-Record (src/constants/).
 // A server test fails if the two copies differ, so change both together.
 
 // A course runs either by semester (Sem I-VIII) or by year (Year I-III) (SRS ORG-05).

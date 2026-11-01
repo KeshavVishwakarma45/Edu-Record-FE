@@ -1,21 +1,16 @@
 {
-  "name": "edurecords",
+  "name": "edu-record",
   "version": "0.1.0",
   "private": true,
-  "description": "EduRecords: marksheet, degree and TC tracking portal for Sant Singaji Education Society",
+  "description": "EduRecords web app: React + MUI frontend for the Sant Singaji Education Society portal",
   "type": "module",
-  "workspaces": [
-    "edu-backend",
-    "edu-frontend"
-  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w edu-backend\" \"npm run dev -w edu-frontend\"",
-    "db:local": "npm run db:local -w edu-backend",
-    "seed": "npm run seed -w edu-backend",
-    "test": "npm test -w edu-backend",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -29,9 +24,23 @@
     ],
     "*.{json,md,css,html}": "prettier --check"
   },
+  "dependencies": {
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/icons-material": "9.5.0",
+    "@mui/material": "9.5.0",
+    "@mui/x-date-pickers": "9.17.0",
+    "axios": "1.21.0",
+    "dayjs": "1.11.23",
+    "notistack": "3.0.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-hook-form": "7.91.0",
+    "react-router-dom": "7.18.5"
+  },
   "devDependencies": {
     "@eslint/js": "9.39.5",
-    "concurrently": "10.0.6",
+    "@vitejs/plugin-react": "6.1.2",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react": "7.37.5",
@@ -40,6 +49,7 @@
     "globals": "17.14.0",
     "husky": "9.1.7",
     "lint-staged": "16.4.0",
-    "prettier": "3.9.10"
+    "prettier": "3.9.10",
+    "vite": "8.3.5"
   }
 }
