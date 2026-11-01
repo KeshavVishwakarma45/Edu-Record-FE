@@ -23,16 +23,16 @@ export default function LoginPage() {
   const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState('');
-  const methods = useForm({ defaultValues: { mobile: '', password: '' } });
+  const methods = useForm({ defaultValues: { email: '', password: '' } });
 
   // After login, go back to the page the user originally wanted
   const from = location.state?.from?.pathname || '/';
   if (user) return <Navigate to={from} replace />;
 
-  const onSubmit = methods.handleSubmit(async ({ mobile, password }) => {
+  const onSubmit = methods.handleSubmit(async ({ email, password }) => {
     setServerError('');
     try {
-      await login(mobile.trim(), password);
+      await login(email.trim(), password);
       navigate(from, { replace: true });
     } catch (error) {
       setServerError(getErrorMessage(error));
@@ -61,14 +61,15 @@ export default function LoginPage() {
           <Stack component="form" noValidate spacing={2} onSubmit={onSubmit}>
             {serverError && <Alert severity="error">{serverError}</Alert>}
             <FormTextField
-              name="mobile"
-              label="Mobile number"
+              name="email"
+              label="Email"
+              type="email"
               autoComplete="username"
               autoFocus
-              slotProps={{ htmlInput: { inputMode: 'numeric', maxLength: 10 } }}
               rules={{
-                required: 'Enter your mobile number',
-                pattern: { value: /^[6-9]\d{9}$/, message: 'Enter a 10-digit mobile number' },
+                required: 'Enter your email',
+                // Same check as the server: something@something.something
+                pattern: { value: /^\S+@\S+\.\S+$/, message: 'Enter a valid email address' },
               }}
             />
             <FormTextField

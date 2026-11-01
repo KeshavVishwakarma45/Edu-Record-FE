@@ -5,6 +5,7 @@ import AppLayout from '@/layouts/AppLayout';
 import ProtectedRoute from '@/routes/ProtectedRoute';
 import { appRoutes } from '@/routes/routes';
 import LoginPage from '@/pages/auth/LoginPage';
+import SetPasswordPage from '@/pages/auth/SetPasswordPage';
 import NotFoundPage from '@/pages/system/NotFoundPage';
 
 // The page list lives in routes/routes.jsx. This file only wires it together:
@@ -19,6 +20,8 @@ const router = createBrowserRouter([
     errorElement: <ErrorBoundary />,
     children: [
       { path: '/login', element: <LoginPage /> },
+      // Opened from an invite or password-reset link; no login needed
+      { path: '/set-password/:token', element: <SetPasswordPage /> },
       {
         element: (
           <ProtectedRoute>
@@ -26,9 +29,9 @@ const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         children: [
-          ...appRoutes.map(({ path, element, roles }) => ({
-            path,
-            element: <ProtectedRoute roles={roles}>{element}</ProtectedRoute>,
+          ...appRoutes.map((route) => ({
+            path: route.path,
+            element: <ProtectedRoute route={route}>{route.element}</ProtectedRoute>,
           })),
           { path: '*', element: <NotFoundPage /> },
         ],
