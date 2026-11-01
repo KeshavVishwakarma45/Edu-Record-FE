@@ -11,11 +11,10 @@ import {
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useAuth } from '@/hooks/useAuth';
-import { ROLE_LABELS } from '@/constants/roles';
 
 // Round button with the user's initials; opens name, role in this institute, and Log out.
 export default function UserMenu() {
-  const { user, currentRole, logout } = useAuth();
+  const { user, currentRoleName, logout } = useAuth();
   const [anchor, setAnchor] = useState(null);
   const initials = user.name
     .split(' ')
@@ -44,10 +43,8 @@ export default function UserMenu() {
       >
         <Box sx={{ px: 2, py: 1 }}>
           <Typography sx={{ fontWeight: 600 }}>{user.name}</Typography>
-          <Typography sx={{ color: 'text.secondary' }}>
-            {ROLE_LABELS[currentRole] ?? 'No role'}
-          </Typography>
-          <Typography sx={{ color: 'text.secondary' }}>{user.mobile}</Typography>
+          <Typography sx={{ color: 'text.secondary' }}>{currentRoleName ?? 'No role'}</Typography>
+          <Typography sx={{ color: 'text.secondary' }}>{user.email}</Typography>
         </Box>
         <Divider />
         <MenuItem onClick={logout}>

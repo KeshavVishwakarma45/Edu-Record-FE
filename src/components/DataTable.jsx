@@ -12,21 +12,32 @@ import {
   TablePagination,
   TableRow,
   TableSortLabel,
+  MenuItem,
   TextField,
   Tooltip,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EmptyState from './EmptyState';
 import ErrorState from './ErrorState';
+import InstituteBadge from './InstituteBadge';
+import { useAuth } from '@/hooks/useAuth';
 
 // Every list screen uses this table. Paging, sorting and search happen on the SERVER:
 // the table only shows one page and tells useList what changed.
 //
 // columns:    [{ field, header, render?(row), sortable?, width? }]
 // params:     { page, limit, sort, search } from useList
-// rowActions: [{ label, icon: EditIcon, onClick(row), color? }] shown as icon buttons per row
+// rowActions: [{ label, icon: EditIcon, onClick(row), color?, show?(row) }] shown as icon buttons per row
+//             show(row) false hides that action on that row (e.g. "Enable" only for disabled users)
+//
+// In the Super Admin's "All institutes" view the table adds an Institute column (from
+// row.instituteId) and an Institute filter (params.instituteId). Pages whose rows are not
+// institute records (Users, Roles) pass instituteColumn={false} and show their own column;
+// the filter stays (instituteFilter), and their API reads params.instituteId its own way.
 export default function DataTable({
-  columns,
+  columns: pageColumns,
+  instituteColumn = true,
+  instituteFilter = true,
   rows,
   total,
   loading,
@@ -39,6 +50,20 @@ export default function DataTable({
   searchPlaceholder = 'Search',
   emptyText = 'No records found',
 }) {
+  const { allInstitutes, realInstitutes } = useAuth();
+  const showInstitutes = allInstitutes && instituteColumn;
+  const showFilter = allInstitutes && instituteFilter;
+  const shortCodeOf = (id) => realInstitutes.find((i) => i.id === String(id))?.shortCode ?? '—';
+  const columns = showInstitutes
+    ? [
+        {
+          field: 'instituteId',
+          header: 'Institute',
+          render: (row) => <InstituteBadge shortCode={shortCodeOf(row.instituteId)} />,
+        },
+        ...pageColumns,
+      ]
+    : pageColumns;
   const columnCount = columns.length + (rowActions.length > 0 ? 1 : 0);
   const sortField = params.sort?.replace(/^-/, '');
   const sortDirection = params.sort?.startsWith('-') ? 'desc' : 'asc';
@@ -94,21 +119,23 @@ export default function DataTable({
         ))}
         {rowActions.length > 0 && (
           <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-            {rowActions.map(({ label, icon: Icon, onClick, color }) => (
-              <Tooltip key={label} title={label}>
-                <IconButton
-                  aria-label={label}
-                  color={color}
-                  size="small"
-                  onClick={(event) => {
-                    event.stopPropagation(); // do not also trigger onRowClick
-                    onClick(row);
-                  }}
-                >
-                  <Icon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            ))}
+            {rowActions
+              .filter((action) => !action.show || action.show(row))
+              .map(({ label, icon: Icon, onClick, color }) => (
+                <Tooltip key={label} title={label}>
+                  <IconButton
+                    aria-label={label}
+                    color={color}
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation(); // do not also trigger onRowClick
+                      onClick(row);
+                    }}
+                  >
+                    <Icon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              ))}
           </TableCell>
         )}
       </TableRow>
@@ -117,14 +144,31 @@ export default function DataTable({
 
   return (
     <Paper>
-      <Box sx={{ p: 2, pb: 1 }}>
+      <Box sx={{ p: 2, pb: 1, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+        {showFilter && (
+          <TextField
+            select
+            label="Institute"
+            value={params.instituteId ?? ''}
+            onChange={(event) => onParamsChange({ instituteId: event.target.value })}
+            fullWidth={false}
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="">All institutes</MenuItem>
+            {realInstitutes.map((institute) => (
+              <MenuItem key={institute.id} value={institute.id}>
+                {institute.shortCode}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
         <TextField
           type="search"
           label="Search"
           placeholder={searchPlaceholder}
           value={params.search ?? ''}
           onChange={(event) => onParamsChange({ search: event.target.value })}
-          sx={{ maxWidth: { sm: 360 } }}
+          sx={{ maxWidth: { sm: 360 }, flex: '1 1 240px' }}
           slotProps={{
             input: {
               startAdornment: (

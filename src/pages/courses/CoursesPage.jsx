@@ -2,21 +2,25 @@
  * HOW TO COPY THIS PAGE FOR A NEW MODULE
  * 1. Make the API file first: copy src/api/courses.js to src/api/<module>.js and change the URLs.
  * 2. Copy this file to src/pages/<module>/<Module>Page.jsx and rename "course" everywhere.
- * 3. Add the page to src/routes/routes.jsx with its roles (from the SRS) and its menu entry.
+ * 3. Add the page to src/routes/routes.jsx with its `permission` and its menu entry; hide write
+ *    buttons with can(PERMISSIONS.X) from useAuth(), like canWrite below.
  * 4. Change `columns` to what your list shows. Mark a column sortable only if the server's
  *    listQuery([...]) allows that field.
  * 5. Change <CourseFields> to your form fields, using the Form* components and the SAME rules
  *    as the server's Joi schema (the server stays the authority).
- * 6. Test as every role that should and should not see it, and at 360 px phone width.
+ * 6. Send every change to the record's own institute (row.instituteId, see handleSave), so it
+ *    also works in the Super Admin's "All institutes" view. DataTable adds the Institute column.
+ * 7. Test as every role that should and should not see it, and at 360 px phone width.
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import { coursesApi } from '@/api/courses';
-import { COURSE_WRITE_ROLES } from '@/constants/roles';
+import { PERMISSIONS } from '@/constants/permissions';
 import {
   COURSE_PATTERNS,
   COURSE_PATTERN_LIST,
@@ -58,6 +62,7 @@ const columns = [
 // ---- Form -------------------------------------------------------------------------------
 
 const NEW_COURSE = {
+  instituteId: '', // the selected institute; the Super Admin chooses it in "All institutes"
   affiliationId: '',
   name: '',
   shortCode: '',
@@ -80,6 +85,7 @@ const splitTerms = (text) =>
     .filter(Boolean);
 
 const toFormValues = (course) => ({
+  instituteId: course.instituteId,
   affiliationId: course.affiliationId,
   name: course.name,
   shortCode: course.shortCode,
@@ -95,20 +101,40 @@ function toApiData({ examTerms, ...values }) {
   return terms.length > 0 ? { ...values, examTerms: terms } : values;
 }
 
-// The fields inside the dialog. It loads the affiliation choices when the dialog opens.
-function CourseFields() {
-  const [affiliations, setAffiliations] = useState([]);
+// The fields inside the dialog. It loads the affiliation choices of the course's institute.
+// isNew: adding (in "All institutes" the Super Admin first chooses the institute).
+function CourseFields({ isNew }) {
+  const { allInstitutes, realInstitutes } = useAuth();
+  const { setValue } = useFormContext();
+  const instituteId = useWatch({ name: 'instituteId' });
+  const [loaded, setLoaded] = useState({ instituteId: null, affiliations: [] });
   const notify = useNotify();
 
   useEffect(() => {
+    if (!instituteId) return;
     coursesApi
-      .options()
-      .then((options) => setAffiliations(options.affiliations))
+      .options(instituteId)
+      .then((options) => setLoaded({ instituteId, affiliations: options.affiliations }))
       .catch(notify.error);
-  }, [notify]);
+    // Another institute has other affiliations: the old choice no longer fits
+    if (isNew) setValue('affiliationId', '');
+  }, [instituteId, isNew, setValue, notify]);
+
+  const affiliations = loaded.instituteId === instituteId ? loaded.affiliations : [];
 
   return (
     <>
+      {allInstitutes && isNew && (
+        <FormSelect
+          name="instituteId"
+          label="Institute"
+          options={realInstitutes.map((i) => ({
+            value: i.id,
+            label: `${i.shortCode} · ${i.name}`,
+          }))}
+          rules={{ required: 'Choose the institute' }}
+        />
+      )}
       <FormTextField
         name="name"
         label="Name"
@@ -176,8 +202,8 @@ function CourseFields() {
 export default function CoursesPage({ startWithAddDialog = false }) {
   const navigate = useNavigate();
   const notify = useNotify();
-  const { currentRole, selectedInstitute } = useAuth();
-  const canWrite = COURSE_WRITE_ROLES.includes(currentRole);
+  const { can, selectedInstitute, allInstitutes } = useAuth();
+  const canWrite = can(PERMISSIONS.COURSE_WRITE);
 
   // Reloads by itself when page, sort, search or the selected institute change
   const list = useList(coursesApi.list, { sort: 'name' });
@@ -187,6 +213,7 @@ export default function CoursesPage({ startWithAddDialog = false }) {
 
   // editing: null = dialog closed, NEW_COURSE = adding, a course = editing that course
   const [editing, setEditing] = useState(startWithAddDialog ? NEW_COURSE : null);
+  const newCourse = { ...NEW_COURSE, instituteId: allInstitutes ? '' : selectedInstitute?.id };
   const [deleting, setDeleting] = useState(null);
 
   const closeDialog = () => {
@@ -195,13 +222,14 @@ export default function CoursesPage({ startWithAddDialog = false }) {
   };
 
   // Errors are not caught here: FormDialog shows them on the fields and keeps the dialog open
-  const handleSave = async (values) => {
+  // Every change goes to the course's own institute (needed in the "All institutes" view)
+  const handleSave = async ({ instituteId, ...values }) => {
     const data = toApiData(values);
     if (editing._id) {
-      await updateRequest.run(editing._id, data);
+      await updateRequest.run(editing._id, data, editing.instituteId);
       notify.success('Course updated');
     } else {
-      await createRequest.run(data);
+      await createRequest.run(data, instituteId);
       notify.success('Course added');
     }
     closeDialog();
@@ -210,7 +238,7 @@ export default function CoursesPage({ startWithAddDialog = false }) {
 
   const handleDelete = async () => {
     try {
-      await removeRequest.run(deleting._id);
+      await removeRequest.run(deleting._id, deleting.instituteId);
       notify.success('Course deleted');
       setDeleting(null);
       list.reload();
@@ -230,7 +258,11 @@ export default function CoursesPage({ startWithAddDialog = false }) {
     <>
       <PageHeader
         title="Courses"
-        subtitle={`Courses offered by ${selectedInstitute?.name ?? 'this institute'}`}
+        subtitle={
+          allInstitutes
+            ? 'Courses of every institute'
+            : `Courses offered by ${selectedInstitute?.name ?? 'this institute'}`
+        }
         actions={
           canWrite && (
             <Button
@@ -261,13 +293,13 @@ export default function CoursesPage({ startWithAddDialog = false }) {
       <FormDialog
         open={Boolean(editing)}
         title={editing?._id ? 'Edit course' : 'Add course'}
-        defaultValues={editing?._id ? toFormValues(editing) : NEW_COURSE}
+        defaultValues={editing?._id ? toFormValues(editing) : newCourse}
         submitLabel={editing?._id ? 'Save changes' : 'Add course'}
         loading={createRequest.loading || updateRequest.loading}
         onSubmit={handleSave}
         onClose={closeDialog}
       >
-        <CourseFields />
+        <CourseFields isNew={!editing?._id} />
       </FormDialog>
 
       <ConfirmDialog

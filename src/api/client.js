@@ -29,9 +29,19 @@ export const api = axios.create({ baseURL, withCredentials: true }); // withCred
 
 api.interceptors.request.use((config) => {
   if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
-  if (instituteId) config.headers['X-Institute-Id'] = instituteId;
+  // A request sent with inInstitute(id) keeps its own institute
+  if (instituteId && !config.headers['X-Institute-Id']) {
+    config.headers['X-Institute-Id'] = instituteId;
+  }
   return config;
 });
+
+// The Super Admin's "All institutes" view: lists show every institute, but every change goes to
+// one institute. API functions take an optional instituteId and pass it on with inInstitute():
+//   update: (id, data, instituteId) => api.patch(`/courses/${id}`, data, inInstitute(instituteId))
+// Without an id the request goes to the selected institute, as usual.
+export const ALL_INSTITUTES = 'all';
+export const inInstitute = (id) => (id ? { headers: { 'X-Institute-Id': id } } : {});
 
 // If five requests fail with 401 at the same time, they all wait for this ONE refresh call
 let refreshPromise = null;
@@ -66,7 +76,7 @@ function toApiError(error) {
   };
 }
 
-const AUTH_URLS = ['/auth/login', '/auth/refresh', '/auth/logout'];
+const AUTH_URLS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/setup'];
 
 api.interceptors.response.use(
   (response) => response,
@@ -76,7 +86,7 @@ api.interceptors.response.use(
       error.response?.status === 401 &&
       original &&
       !original.retried &&
-      !AUTH_URLS.some((url) => original.url?.endsWith(url));
+      !AUTH_URLS.some((url) => original.url?.includes(url));
 
     if (shouldRefresh) {
       original.retried = true;
