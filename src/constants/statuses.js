@@ -35,6 +35,13 @@ export const STUDENT_STATUSES = Object.freeze({
 
 export const STUDENT_STATUS_LIST = Object.values(STUDENT_STATUSES);
 
+export const STUDENT_STATUS_COLORS = Object.freeze({
+  [STUDENT_STATUSES.STUDYING]: 'success',
+  [STUDENT_STATUSES.PASSED_OUT]: 'info',
+  [STUDENT_STATUSES.Left]: 'warning',
+  [STUDENT_STATUSES.TC_ISSUED]: 'secondary',
+});
+
 // User account status. An invited user has no password until they open the invite link.
 export const USER_STATUSES = Object.freeze({
   INVITED: 'Invited',
