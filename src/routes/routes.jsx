@@ -17,7 +17,7 @@ import RolesPage from '@/pages/admin/RolesPage';
 import OrganisationPage from '@/pages/admin/OrganisationPage';
 import ComingSoonPage from '@/pages/system/ComingSoonPage';
 import StudentPage from '@/pages/students/StudentsPage';
-
+import StudentProfilePage from '@/pages/students/StudentProfilePage';
 // EVERY page of the app is listed here, once. The sidebar menu is built from this same list,
 // so adding a page and its menu item is one entry.
 //   path:           the URL
@@ -50,6 +50,11 @@ export const appRoutes = [
     element: <StudentPage />,
     permission: PERMISSIONS.STUDENT_READ,
     menu: { label: 'Students', icon: PeopleOutlinedIcon },
+  },
+  {
+    path: '/students/:id',
+    element: <StudentProfilePage />,
+    permission: PERMISSIONS.STUDENT_READ,
   },
   {
     path: '/inward',

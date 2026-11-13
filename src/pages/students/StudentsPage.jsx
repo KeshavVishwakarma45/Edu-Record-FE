@@ -2,7 +2,6 @@ import { useList } from '@/hooks/useList';
 import { coursesApi } from '@/api/courses';
 
 import { useState } from 'react';
-import { Button } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 
 import PageHeader from '@/components/PageHeader';
@@ -18,6 +17,16 @@ import { CATEGORY_LIST } from '@/constants/categories';
 
 import FormPhotoUpload from '@/components/form/FormPhotoUpload';
 import StatusChip from '@/components/StatusChip';
+import { studentsApi } from '@/api/students';
+
+import { Box, Button } from '@mui/material';
+import BulkImportButton from './BulkImportButton';
+import { useNavigate } from 'react-router-dom';
+
+import dayjs from 'dayjs';
+import { useAuth } from '@/hooks/useAuth';
+import { useRequest } from '@/hooks/useRequest';
+import { useNotify } from '@/hooks/useNotify';
 
 const genderOptions = GENDER_LIST.map((gender) => ({
   value: gender,
@@ -83,21 +92,26 @@ const columns = [
 ];
 
 export default function StudentsPage() {
+  const { selectedInstitute, allInstitutes } = useAuth();
+  const notify = useNotify();
+
+  const { run: createStudent, loading: createLoading } = useRequest(studentsApi.create);
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [tableParams, setTableParams] = useState({
+  const {
+    rows: studentRows,
+    total: studentTotal,
+    loading: studentsLoading,
+    error: studentsError,
+    params: tableParams,
+    setParams: setTableParams,
+    reload: reloadStudents,
+  } = useList(studentsApi.list, {
     page: 1,
     limit: 10,
-    sort: '',
+    sort: 'createdAt',
     search: '',
   });
-
-  const handleParamsChange = (newParams) => {
-    setTableParams((prev) => ({
-      ...prev,
-      ...newParams,
-      ...(newParams.search !== undefined || newParams.limit !== undefined ? { page: 1 } : {}),
-    }));
-  };
 
   const {
     rows: courses,
@@ -110,28 +124,57 @@ export default function StudentsPage() {
     label: `${course.name} (${course.shortCode})`,
   }));
 
+  const handleSave = async (values) => {
+    if (allInstitutes || !selectedInstitute?.id) {
+      notify.error('Please select one institute first');
+      return;
+    }
+
+    const { photo, ...studentData } = values;
+
+    const payload = {
+      ...studentData,
+      dob: dayjs(values.dob).format('YYYY-MM-DD'),
+      admissionDate: dayjs(values.admissionDate).format('YYYY-MM-DD'),
+    };
+
+    await createStudent(payload, selectedInstitute.id);
+
+    notify.success('Student added successfully');
+    setOpen(false);
+    reloadStudents();
+  };
+
   return (
     <>
       <PageHeader
         title="Students"
         subtitle="Manage student records"
         actions={
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
-            Add Student
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <BulkImportButton onImported={reloadStudents} />
+
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
+              Add Student
+            </Button>
+          </Box>
         }
       />
 
       <DataTable
         columns={columns}
-        rows={[]}
-        total={0}
-        loading={false}
+        rows={studentRows}
+        total={studentTotal}
+        loading={studentsLoading}
+        error={studentsError}
+        onRetry={reloadStudents}
         params={tableParams}
-        onParamsChange={handleParamsChange}
+        onParamsChange={setTableParams}
+        onRowClick={(row) => navigate(`/students/${row._id}`)}
         searchPlaceholder="Search by name, scholar no., enrollment no. or mobile"
         emptyText="Student records will appear here"
       />
+
       <FormDialog
         open={open}
         title="Add Student"
@@ -157,7 +200,8 @@ export default function StudentsPage() {
           batch: '',
         }}
 
-        onSubmit={async () => {}}
+        onSubmit={handleSave}
+        loading={createLoading}
         onClose={() => setOpen(false)}
         submitLabel="Save Student"
       >
@@ -297,8 +341,7 @@ export default function StudentsPage() {
           multiline
           rows={3}
           rules={{
-            validate: (value) =>
-              !String(value ?? '').trim() || 'Address cannot contain only spaces',
+            validate: (value) => Boolean(String(value ?? '').trim()) || 'Address cannot be empty',
           }}
           fullWidth
         />
@@ -351,7 +394,7 @@ export default function StudentsPage() {
           name="branch"
           label="Branch"
           rules={{
-            validate: (value) => !String(value ?? '').trim() || 'Branch cannot contain only spaces',
+            validate: (value) => Boolean(String(value ?? '').trim()) || 'Branch cannot be empty',
           }}
           fullWidth
         />
@@ -360,7 +403,7 @@ export default function StudentsPage() {
           name="batch"
           label="Batch"
           rules={{
-            validate: (value) => !String(value ?? '').trim() || 'Batch cannot contain only spaces',
+            validate: (value) => Boolean(String(value ?? '').trim()) || 'Batch cannot be empty',
           }}
           fullWidth
         />

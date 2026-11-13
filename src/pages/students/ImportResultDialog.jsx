@@ -12,37 +12,20 @@ import {
   TableHead,
   TableRow,
 } from '@mui/material';
-import { STUDENT_COLUMNS } from '@/utils/studentExcel';
 
-const headerOf = (field) => STUDENT_COLUMNS.find((column) => column.key === field)?.header ?? field;
-
-// Step 1 (outcome is null): what the file check found, with an Import button.
-// Step 2 (outcome is set): what the server did: how many were added and which rows it refused.
-// result: { valid, errors } from validateStudentRows. null = dialog closed.
-export default function ImportResultDialog({ result, outcome, importing, onImport, onClose }) {
-  const valid = result?.valid ?? [];
-  const errors = outcome ? outcome.errors : (result?.errors ?? []);
+export default function ImportResultDialog({ result, outcome, onClose }) {
+  const errors = outcome?.errors ?? [];
   const errorRows = new Set(errors.map((error) => error.row)).size;
 
   return (
-    <Dialog
-      open={Boolean(result)}
-      onClose={importing ? undefined : onClose}
-      fullWidth
-      maxWidth="md"
-    >
-      <DialogTitle>{outcome ? 'Import result' : 'File check result'}</DialogTitle>
+    <Dialog open={Boolean(result)} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>Import result</DialogTitle>
+
       <DialogContent dividers>
-        {outcome ? (
-          <Alert severity={errors.length > 0 ? 'warning' : 'success'} sx={{ mb: 2 }}>
-            {outcome.created} student(s) added. {errorRows} row(s) were refused by the server.
-          </Alert>
-        ) : (
-          <Alert severity={errors.length > 0 ? 'warning' : 'success'} sx={{ mb: 2 }}>
-            {valid.length} row(s) are correct. {errorRows} row(s) have errors and will not be
-            imported.
-          </Alert>
-        )}
+        <Alert severity={outcome?.failed > 0 ? 'warning' : 'success'} sx={{ mb: 2 }}>
+          {outcome?.imported ?? 0} of {outcome?.totalRows ?? 0} student(s) imported.{' '}
+          {outcome?.failed ?? 0} row(s) failed. {errorRows} row(s) have details below.
+        </Alert>
 
         {errors.length > 0 && (
           <TableContainer sx={{ maxHeight: 360 }}>
@@ -54,11 +37,12 @@ export default function ImportResultDialog({ result, outcome, importing, onImpor
                   <TableCell>Problem</TableCell>
                 </TableRow>
               </TableHead>
+
               <TableBody>
-                {errors.map((error) => (
-                  <TableRow key={`${error.row}-${error.field}-${error.message}`}>
+                {errors.map((error, index) => (
+                  <TableRow key={`${error.row}-${error.field}-${index}`}>
                     <TableCell>{error.row}</TableCell>
-                    <TableCell>{headerOf(error.field)}</TableCell>
+                    <TableCell>{error.field || '—'}</TableCell>
                     <TableCell>{error.message}</TableCell>
                   </TableRow>
                 ))}
@@ -67,20 +51,9 @@ export default function ImportResultDialog({ result, outcome, importing, onImpor
           </TableContainer>
         )}
       </DialogContent>
+
       <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={onClose} disabled={importing}>
-          Close
-        </Button>
-        {!outcome && (
-          <Button
-            variant="contained"
-            disabled={valid.length === 0}
-            loading={importing}
-            onClick={onImport}
-          >
-            Import {valid.length} student(s)
-          </Button>
-        )}
+        <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
   );

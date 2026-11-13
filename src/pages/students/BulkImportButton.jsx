@@ -1,84 +1,128 @@
 import { useRef, useState } from 'react';
+
 import { Button, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
+
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import { coursesApi } from '@/api/courses';
+
 import { studentImportApi } from '@/api/studentImport';
 import { PERMISSIONS } from '@/constants/permissions';
 import { useAuth } from '@/hooks/useAuth';
 import { useNotify } from '@/hooks/useNotify';
 import { useRequest } from '@/hooks/useRequest';
-import {
-  downloadStudentTemplate,
-  readStudentRows,
-  validateStudentRows,
-} from '@/utils/studentExcel';
+
 import ImportResultDialog from './ImportResultDialog';
 
-// "Bulk Add" button for the Students page header (SRS STU-04), placed beside "Add Student".
-// One button with a small menu: upload the filled Excel file, or download the template first.
-// onImported: the Students page passes its list.reload, so the table shows the new students.
 export default function BulkImportButton({ onImported }) {
-  const { can, allInstitutes } = useAuth();
+  const { can, allInstitutes, selectedInstitute } = useAuth();
   const notify = useNotify();
+
   const fileInput = useRef(null);
-  const [menuAnchor, setMenuAnchor] = useState(null); // null = menu closed
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null); // the file check result; null = dialog closed
-  const [outcome, setOutcome] = useState(null); // the server's answer after Import
+
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const [result, setResult] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+
   const importRequest = useRequest(studentImportApi.importStudents);
 
-  if (!can(PERMISSIONS.STUDENT_IMPORT)) return null;
+  const busy = importRequest.loading;
 
-  const closeMenu = () => setMenuAnchor(null);
+  if (!can(PERMISSIONS.STUDENT_IMPORT)) {
+    return null;
+  }
 
-  const handleTemplate = () => {
+  const closeMenu = () => {
+    setMenuAnchor(null);
+  };
+
+  const getInstituteId = () => {
+    if (allInstitutes || !selectedInstitute?.id) {
+      notify.info('Choose one institute at the top first');
+      return null;
+    }
+
+    return selectedInstitute.id;
+  };
+
+  const handleTemplate = async () => {
     closeMenu();
-    downloadStudentTemplate().catch(notify.error);
+
+    const instituteId = getInstituteId();
+
+    if (!instituteId) return;
+
+    try {
+      const blob = await studentImportApi.downloadTemplate(instituteId);
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'student-import-template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      notify.error(error);
+    }
   };
 
   const handleChooseFile = () => {
     closeMenu();
-    fileInput.current.click();
+
+    const instituteId = getInstituteId();
+
+    if (!instituteId) return;
+
+    fileInput.current?.click();
   };
 
   const handleFile = async (event) => {
-    const file = event.target.files[0];
-    event.target.value = ''; // so the same file can be chosen again
+    const file = event.target.files?.[0];
+
+    event.target.value = '';
+
     if (!file) return;
-    if (allInstitutes) {
-      notify.info('Choose one institute at the top first');
+
+    const instituteId = getInstituteId();
+
+    if (!instituteId) return;
+
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      notify.error(new Error('Please select an .xlsx file'));
       return;
     }
 
-    setBusy(true);
-    try {
-      const { rows: courses } = await coursesApi.list({ page: 1, limit: 100, sort: 'name' });
-      const rows = await readStudentRows(file);
-      setOutcome(null);
-      setResult(validateStudentRows(rows, courses));
-    } catch (error) {
-      notify.error(error);
-    } finally {
-      setBusy(false);
-    }
-  };
+    setOutcome(null);
+    setResult(null);
 
-  // Only the correct rows are sent (a row with any error is never sent)
-  const handleImport = async () => {
     try {
-      const answer = await importRequest.run(result.valid.map((item) => item.data));
-      // The server says "student number 3 failed"; show the Excel row of that student
-      const serverErrors = (answer.errors ?? []).map((error) => ({
-        row: result.valid[error.index]?.row ?? '—',
-        field: error.field,
-        message: error.message,
-      }));
-      setOutcome({ created: answer.created, errors: serverErrors });
-      if (answer.created > 0) {
-        notify.success(`${answer.created} student(s) added`);
-        if (onImported) onImported();
+      const answer = await importRequest.run(file, instituteId);
+
+      const errors = (answer.errors ?? []).flatMap((error) => {
+        const messages = error.messages ?? (error.message ? [error.message] : []);
+
+        return messages.map((message) => ({
+          row: error.row ?? '—',
+          field: error.field ?? '',
+          message,
+        }));
+      });
+
+      setOutcome({
+        totalRows: answer.totalRows,
+        imported: answer.imported,
+        failed: answer.failed,
+        errors,
+      });
+
+      setResult({});
+
+      if (answer.imported > 0) {
+        notify.success(`${answer.imported} student(s) imported`);
+        onImported?.();
       }
     } catch (error) {
       notify.error(error);
@@ -108,12 +152,15 @@ export default function BulkImportButton({ onImported }) {
           <ListItemIcon>
             <UploadFileOutlinedIcon fontSize="small" />
           </ListItemIcon>
+
           <ListItemText>Upload Excel file</ListItemText>
         </MenuItem>
+
         <MenuItem onClick={handleTemplate}>
           <ListItemIcon>
             <FileDownloadOutlinedIcon fontSize="small" />
           </ListItemIcon>
+
           <ListItemText>Download template</ListItemText>
         </MenuItem>
       </Menu>
@@ -123,8 +170,7 @@ export default function BulkImportButton({ onImported }) {
       <ImportResultDialog
         result={result}
         outcome={outcome}
-        importing={importRequest.loading}
-        onImport={handleImport}
+        importing={busy}
         onClose={handleClose}
       />
     </>
