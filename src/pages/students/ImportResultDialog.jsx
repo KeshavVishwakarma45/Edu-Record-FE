@@ -17,18 +17,25 @@ import {
 // result: { totalRows, imported, failed, errors: [{ row, messages | message }] }; null = closed.
 // Normal row errors have "messages" (a list); a missing-column error has a single "message".
 export default function ImportResultDialog({ result, onClose }) {
-  const errors = result?.errors ?? [];
+  // One line per Excel row, and each message only once (the server may repeat a message)
+  const messagesByRow = new Map();
+  (result?.errors ?? []).forEach((error) => {
+    const texts = error.messages ?? [error.message];
+    const known = messagesByRow.get(error.row) ?? [];
+    messagesByRow.set(error.row, [...new Set([...known, ...texts])]);
+  });
+  const errorRows = [...messagesByRow.entries()];
 
   return (
     <Dialog open={Boolean(result)} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>Import result</DialogTitle>
       <DialogContent dividers>
-        <Alert severity={errors.length > 0 ? 'warning' : 'success'} sx={{ mb: 2 }}>
+        <Alert severity={errorRows.length > 0 ? 'warning' : 'success'} sx={{ mb: 2 }}>
           {result?.imported ?? 0} student(s) imported, {result?.failed ?? 0} row(s) failed
           {result?.totalRows ? ` (out of ${result.totalRows} rows)` : ''}.
         </Alert>
 
-        {errors.length > 0 && (
+        {errorRows.length > 0 && (
           <TableContainer sx={{ maxHeight: 360 }}>
             <Table size="small" stickyHeader>
               <TableHead>
@@ -38,10 +45,10 @@ export default function ImportResultDialog({ result, onClose }) {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {errors.map((error, index) => (
-                  <TableRow key={`${error.row}-${index}`}>
-                    <TableCell>{error.row}</TableCell>
-                    <TableCell>{(error.messages ?? [error.message]).join('; ')}</TableCell>
+                {errorRows.map(([row, texts]) => (
+                  <TableRow key={row}>
+                    <TableCell>{row}</TableCell>
+                    <TableCell>{texts.join('; ')}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
