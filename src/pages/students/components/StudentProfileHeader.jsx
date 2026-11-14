@@ -1,6 +1,48 @@
+import { useEffect, useState } from 'react';
 import { Avatar, Box, Chip, Grid, Paper, Typography } from '@mui/material';
 
+import { studentsApi } from '@/api/students';
+import { useAuth } from '@/hooks/useAuth';
+
 const StudentProfileHeader = ({ student }) => {
+  const [photoUrl, setPhotoUrl] = useState('');
+  const { selectedInstitute } = useAuth();
+
+  useEffect(() => {
+    let isActive = true;
+    let objectUrl = '';
+
+    const loadPhoto = async () => {
+      if (!student?.photo || !selectedInstitute?.id) {
+        setPhotoUrl('');
+        return;
+      }
+
+      try {
+        const blob = await studentsApi.getPhoto(student.photo, selectedInstitute.id);
+
+        if (!isActive) return;
+
+        objectUrl = URL.createObjectURL(blob);
+        setPhotoUrl(objectUrl);
+      } catch {
+        if (isActive) {
+          setPhotoUrl('');
+        }
+      }
+    };
+
+    loadPhoto();
+
+    return () => {
+      isActive = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [student?.photo, selectedInstitute?.id]);
+
   if (!student) {
     return null;
   }
@@ -13,10 +55,9 @@ const StudentProfileHeader = ({ student }) => {
         borderRadius: 2,
       }}
     >
-      {/* Student basic information */}
       <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
         <Avatar
-          src={student.photo || undefined}
+          src={photoUrl || undefined}
           alt={student.name}
           sx={{
             width: 88,
@@ -48,7 +89,6 @@ const StudentProfileHeader = ({ student }) => {
         />
       </Box>
 
-      {/* Student academic information */}
       <Grid container spacing={2} sx={{ mt: 2 }}>
         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
           <Typography variant="caption" color="text.secondary">

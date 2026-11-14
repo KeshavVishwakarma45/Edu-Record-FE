@@ -96,6 +96,9 @@ export default function StudentsPage() {
   const notify = useNotify();
 
   const { run: createStudent, loading: createLoading } = useRequest(studentsApi.create);
+  const { run: uploadStudentPhoto, loading: photoUploadLoading } = useRequest(
+    studentsApi.uploadPhoto,
+  );
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const {
@@ -138,9 +141,23 @@ export default function StudentsPage() {
       admissionDate: dayjs(values.admissionDate).format('YYYY-MM-DD'),
     };
 
-    await createStudent(payload, selectedInstitute.id);
+    // Step 1: Create student
+    const createdStudent = await createStudent(payload, selectedInstitute.id);
 
-    notify.success('Student added successfully');
+    // Step 2: Upload photo if selected
+    if (photo) {
+      try {
+        await uploadStudentPhoto(createdStudent._id, photo, selectedInstitute.id);
+
+        notify.success('Student and photo added successfully');
+      } catch {
+        notify.error('Student created, but photo upload failed. Please try uploading again.');
+      }
+    } else {
+      notify.success('Student added successfully');
+    }
+
+    // Step 3: Close dialog and refresh list
     setOpen(false);
     reloadStudents();
   };
@@ -201,7 +218,7 @@ export default function StudentsPage() {
         }}
 
         onSubmit={handleSave}
-        loading={createLoading}
+        loading={createLoading || photoUploadLoading}
         onClose={() => setOpen(false)}
         submitLabel="Save Student"
       >
