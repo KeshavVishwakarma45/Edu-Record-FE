@@ -7,7 +7,13 @@ import { api, inInstitute, unwrap, unwrapList } from './client';
 // institute, so changes also work in the Super Admin's "All institutes" view.
 export const coursesApi = {
   // params: { page, limit, sort, search, instituteId? } -> { rows, total }
-  list: (params) => api.get('/courses', { params }).then(unwrapList),
+  list: (params, instituteId) =>
+    api
+      .get('/courses', {
+        params,
+        ...inInstitute(instituteId),
+      })
+      .then(unwrapList),
   get: (id) => api.get(`/courses/${id}`).then(unwrap),
   create: (data, instituteId) => api.post('/courses', data, inInstitute(instituteId)).then(unwrap),
   update: (id, data, instituteId) =>

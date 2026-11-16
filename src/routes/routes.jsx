@@ -17,7 +17,11 @@ import RolesPage from '@/pages/admin/RolesPage';
 import OrganisationPage from '@/pages/admin/OrganisationPage';
 import ComingSoonPage from '@/pages/system/ComingSoonPage';
 import StudentPage from '@/pages/students/StudentsPage';
+import InwardBatchesPage from '@/pages/inward/InwardBatchesPage';
 import StudentProfilePage from '@/pages/students/StudentProfilePage';
+import TCsPage from '@/pages/tc/TCsPage';
+import ReportsPage from '@/pages/reports/ReportsPage';
+
 // EVERY page of the app is listed here, once. The sidebar menu is built from this same list,
 // so adding a page and its menu item is one entry.
 //   path:           the URL
@@ -58,9 +62,9 @@ export const appRoutes = [
   },
   {
     path: '/inward',
-    element: <ComingSoonPage title="Inward" srsIds="INW-01 to INW-07" />,
+    element: <InwardBatchesPage />,
     permission: PERMISSIONS.INWARD_READ,
-    menu: { label: 'Inward', icon: MoveToInboxOutlinedIcon, comingSoon: true },
+    menu: { label: 'Inward', icon: MoveToInboxOutlinedIcon },
   },
   {
     path: '/handover',
@@ -76,15 +80,15 @@ export const appRoutes = [
   },
   {
     path: '/tc',
-    element: <ComingSoonPage title="Transfer Certificates" srsIds="TC-01 to TC-08" />,
+    element: <TCsPage />,
     permission: PERMISSIONS.TC_READ,
-    menu: { label: 'TC', icon: DescriptionOutlinedIcon, comingSoon: true },
+    menu: { label: 'TC', icon: DescriptionOutlinedIcon },
   },
   {
     path: '/reports',
-    element: <ComingSoonPage title="Reports" srsIds="RPT-02 (P1), RPT-01, RPT-03 to RPT-05 (P2)" />,
+    element: <ReportsPage />,
     permission: PERMISSIONS.REPORT_VIEW,
-    menu: { label: 'Reports', icon: AssessmentOutlinedIcon, comingSoon: true },
+    menu: { label: 'Reports', icon: AssessmentOutlinedIcon },
   },
 
   // Administration (ADR-016)
