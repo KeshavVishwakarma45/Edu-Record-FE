@@ -21,6 +21,7 @@ import InwardBatchesPage from '@/pages/inward/InwardBatchesPage';
 import StudentProfilePage from '@/pages/students/StudentProfilePage';
 import TCsPage from '@/pages/tc/TCsPage';
 import ReportsPage from '@/pages/reports/ReportsPage';
+import ClearancePage from '@/pages/clearance/ClearancePage';
 
 // EVERY page of the app is listed here, once. The sidebar menu is built from this same list,
 // so adding a page and its menu item is one entry.
@@ -74,9 +75,9 @@ export const appRoutes = [
   },
   {
     path: '/clearance',
-    element: <ComingSoonPage title="Clearance" srsIds="CLR-01 to CLR-05" />,
+    element: <ClearancePage />,
     permission: PERMISSIONS.CLEARANCE_VIEW,
-    menu: { label: 'Clearance', icon: FactCheckOutlinedIcon, comingSoon: true },
+    menu: { label: 'Clearance', icon: FactCheckOutlinedIcon },
   },
   {
     path: '/tc',
