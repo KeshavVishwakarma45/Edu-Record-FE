@@ -115,6 +115,10 @@ const HandoverPage = () => {
     if (!photo) {
       missing.push('add the receiver photo');
     }
+
+    if (!signedReceipt) {
+      missing.push('upload the signed receipt');
+    }
   }
 
   const loadDocuments = async (student) => {
@@ -208,6 +212,10 @@ const HandoverPage = () => {
 
   const handleConfirm = async () => {
     try {
+      if (!signedReceipt) {
+        throw new Error('Please upload the signed receipt.');
+      }
+
       // Step 1: Upload receiver photo
       const photoResponse = await handoverApi.uploadPhoto(
         selectedStudent._id,
@@ -221,21 +229,17 @@ const HandoverPage = () => {
         throw new Error('Receiver photo upload failed. File ID not received.');
       }
 
-      // Step 2: Upload signed receipt if selected
-      let signedReceiptId;
+      // Step 2: Upload mandatory signed receipt
+      const signatureResponse = await handoverApi.uploadSignature(
+        selectedStudent._id,
+        signedReceipt,
+        selectedStudent.instituteId,
+      );
 
-      if (signedReceipt) {
-        const signatureResponse = await handoverApi.uploadSignature(
-          selectedStudent._id,
-          signedReceipt,
-          selectedStudent.instituteId,
-        );
+      const signedReceiptId = signatureResponse?.fileId;
 
-        signedReceiptId = signatureResponse?.fileId;
-
-        if (!signedReceiptId) {
-          throw new Error('Signed receipt upload failed. File ID not received.');
-        }
+      if (!signedReceiptId) {
+        throw new Error('Signed receipt upload failed. File ID not received.');
       }
 
       // Step 3: Submit handover using uploaded file IDs
@@ -246,7 +250,7 @@ const HandoverPage = () => {
         receiverName: pending.receiverName.trim(),
         mobile: pending.mobile.trim(),
         receiverPhotoId,
-        ...(signedReceiptId && { signedReceiptId }),
+        signedReceiptId,
       };
 
       await createRequest.run(handoverData, selectedStudent.instituteId);
