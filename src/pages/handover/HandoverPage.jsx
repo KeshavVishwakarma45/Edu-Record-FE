@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
 
 import {
   Alert,
@@ -69,8 +69,11 @@ const HandoverPage = () => {
       }
     };
   }, [photoPreview]);
-
   const form = useForm({ defaultValues: EMPTY_RECEIVER });
+
+  const receiverName = useWatch({ control: form.control, name: 'receiverName' }) ?? '';
+
+  const receiverMobile = useWatch({ control: form.control, name: 'mobile' }) ?? '';
 
   // Signed receipt preview
   const signedReceiptPreview = useMemo(
@@ -110,6 +113,16 @@ const HandoverPage = () => {
   } else {
     if (selectedDocumentIds.length === 0) {
       missing.push('select at least one document');
+    }
+
+    if (!receiverName.trim()) {
+      missing.push('enter the receiver name');
+    }
+
+    if (!receiverMobile.trim()) {
+      missing.push('enter the mobile number');
+    } else if (!MOBILE_PATTERN.test(receiverMobile.trim())) {
+      missing.push('enter a valid 10-digit mobile number');
     }
 
     if (!photo) {
@@ -181,7 +194,9 @@ const HandoverPage = () => {
   };
 
   const handleSelectAll = (event) => {
-    setSelectedDocumentIds(event.target.checked ? availableDocuments.map((item) => item._id) : []);
+    setSelectedDocumentIds(
+      event.target.checked ? availableDocuments.map((item) => item.documentId) : [],
+    );
   };
 
   // Same limits as the server: images up to 2 MB, PDFs up to 5 MB
@@ -197,7 +212,7 @@ const HandoverPage = () => {
       notify.error(
         allowPdf
           ? 'Only JPG, PNG, WEBP or PDF files are allowed'
-          : 'Only JPG, PNG or WEBP images are allowed',
+          : 'Only JPG or PNG images are allowed',
       );
       return;
     }
@@ -248,7 +263,7 @@ const HandoverPage = () => {
         documentIds: selectedDocumentIds,
         receiverType: 'SELF',
         receiverName: pending.receiverName.trim(),
-        mobile: pending.mobile.trim(),
+        receiverMobile: pending.mobile.trim(),
         receiverPhotoId,
         signedReceiptId,
       };
@@ -472,29 +487,30 @@ const HandoverPage = () => {
 
                       <Stack spacing={1}>
                         {availableDocuments.map((document) => (
-                          <Paper key={document._id} variant="outlined" sx={{ p: 2 }}>
+                          <Paper key={document.documentId} variant="outlined" sx={{ p: 2 }}>
                             <FormControlLabel
                               sx={{
                                 m: 0,
                                 width: '100%',
                                 alignItems: 'center',
+                                '& .MuiFormControlLabel-label': {
+                                  flex: 1,
+                                  minWidth: 0,
+                                },
                               }}
                               control={
-                                <Checkbox
-                                  checked={selectedDocumentIds.includes(document._id)}
-                                  onChange={() => handleDocumentSelection(document._id)}
-                                />
-                              }
-                              label={
                                 <Stack
                                   direction="row"
-                                  spacing={1.5}
-                                  sx={{
-                                    alignItems: 'center',
-                                    flexWrap: 'wrap',
-                                  }}
+                                  alignItems="center"
+                                  spacing={1}
+                                  sx={{ width: '100%' }}
                                 >
-                                  <Box>
+                                  <Checkbox
+                                    checked={selectedDocumentIds.includes(document.documentId)}
+                                    onChange={() => handleDocumentSelection(document.documentId)}
+                                  />
+
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
                                     <Typography variant="body1">
                                       {document.documentName || document.documentType}
                                     </Typography>
@@ -504,7 +520,11 @@ const HandoverPage = () => {
                                     </Typography>
                                   </Box>
 
-                                  <StatusChip status={document.status} />
+                                  <StatusChip
+                                    status={document.status}
+                                    color="primary"
+                                    variant="outlined"
+                                  />
                                 </Stack>
                               }
                             />
@@ -531,6 +551,13 @@ const HandoverPage = () => {
                       label="Receiver Name"
                       size="small"
                       fullWidth
+                      helperText={
+                        !receiverName.trim() ? (
+                          <span style={{ color: '#d32f2f' }}>Mandatory field</span>
+                        ) : (
+                          ''
+                        )
+                      }
                       disabled={!selectedStudent}
                       rules={{
                         required: 'Enter the receiver name',
@@ -545,12 +572,27 @@ const HandoverPage = () => {
                       type="tel"
                       size="small"
                       fullWidth
+                      helperText={
+                        !receiverMobile.trim() ? (
+                          <span style={{ color: '#d32f2f' }}>Mandatory field</span>
+                        ) : (
+                          ''
+                        )
+                      }
                       disabled={!selectedStudent}
                       rules={{
                         required: 'Enter the mobile number',
-                        validate: (value) =>
-                          MOBILE_PATTERN.test(String(value ?? '').trim()) ||
-                          'Enter a valid 10-digit mobile number',
+                        validate: (value) => {
+                          const mobile = String(value ?? '').trim();
+
+                          if (!mobile) {
+                            return 'Enter the mobile number';
+                          }
+
+                          return (
+                            MOBILE_PATTERN.test(mobile) || 'Enter a valid 10-digit mobile number'
+                          );
+                        },
                       }}
                     />
                   </Stack>
@@ -570,7 +612,7 @@ const HandoverPage = () => {
                     <input
                       hidden
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/jpeg,image/png"
                       capture="user"
                       onChange={(event) =>
                         pickFile(event, {
@@ -621,17 +663,16 @@ const HandoverPage = () => {
                       mt: 1,
                     }}
                   >
-                    Receiver photo is mandatory to complete the hand-over. JPG, PNG or WEBP, up to 2
-                    MB.
+                    Receiver photo is mandatory to complete the hand-over. JPG or PNG, up to 2 MB.
                   </Typography>
                 </Paper>
 
-                {/* Signed receipt */}
+                {/* Signed Receipt */}
                 <Paper sx={{ p: 3 }}>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
                     <DrawOutlinedIcon color="primary" />
                     <Typography variant="h6" sx={{ lineHeight: 1.4 }}>
-                      Signature / Signed Receipt
+                      Signed Receipt
                     </Typography>
                   </Stack>
 
@@ -658,9 +699,8 @@ const HandoverPage = () => {
                           src={signedReceiptPreview}
                           alt="Signed receipt preview"
                           sx={{
-                            width: '100%',
-                            maxWidth: 300,
-                            maxHeight: 250,
+                            width: 180,
+                            height: 180,
                             objectFit: 'contain',
                             borderRadius: 2,
                             border: '1px solid',
@@ -709,6 +749,7 @@ const HandoverPage = () => {
                     Image up to 2 MB or PDF up to 5 MB.
                   </Typography>
                 </Paper>
+
                 {/* Summary */}
                 <Paper sx={{ p: 3 }}>
                   <Typography variant="h6">Handover Summary</Typography>
@@ -718,6 +759,14 @@ const HandoverPage = () => {
                   <Stack spacing={1}>
                     <Typography variant="body2">
                       Student: {selectedStudent?.name || 'Not selected'}
+                    </Typography>
+
+                    <Typography variant="body2">
+                      Receiver Name: {receiverName.trim() || 'Pending'}
+                    </Typography>
+
+                    <Typography variant="body2">
+                      Mobile Number: {receiverMobile.trim() || 'Pending'}
                     </Typography>
 
                     <Typography variant="body2">
@@ -768,7 +817,9 @@ const HandoverPage = () => {
         <ConfirmDialog
           open={Boolean(pending)}
           title="Complete hand-over?"
-          message={`Hand over ${selectedDocumentIds.length} document(s) of ${selectedStudent?.name ?? ''} to ${pending?.receiverName?.trim() ?? ''}? This cannot be undone.`}
+          message={`Hand over ${selectedDocumentIds.length} document(s) of ${
+            selectedStudent?.name ?? ''
+          } to ${pending?.receiverName?.trim() ?? ''}? This cannot be undone.`}
           confirmLabel="Complete hand-over"
           loading={createRequest.loading}
           onConfirm={handleConfirm}

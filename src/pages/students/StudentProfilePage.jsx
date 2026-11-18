@@ -106,7 +106,7 @@ const StudentProfilePage = () => {
             <Box sx={{ p: 3 }}>
               {activeTab === 0 && <StudentResultsTab />}
               {activeTab === 1 && <StudentDocumentsTab />}
-              {activeTab === 2 && <StudentClearanceTab />}
+              {activeTab === 2 && <StudentClearanceTab studentId={id} />}
               {activeTab === 3 && <StudentTCTab />}
               {activeTab === 4 && <StudentHistoryTab />}
             </Box>

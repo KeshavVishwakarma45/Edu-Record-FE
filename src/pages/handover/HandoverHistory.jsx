@@ -4,6 +4,14 @@ import DataTable from '@/components/DataTable';
 import { useList } from '@/hooks/useList';
 import { handoverApi } from '@/api/handover';
 
+function getHandoverHistory(params) {
+  if (params.fromDate && params.toDate && params.fromDate > params.toDate) {
+    return Promise.resolve({ rows: [], total: 0 });
+  }
+
+  return handoverApi.getHistory(params);
+}
+
 function formatHandoverDate(row) {
   const dateValue =
     row.handoverAt ||
@@ -78,15 +86,16 @@ const columns = [
 ];
 
 export default function HandoverHistory() {
-  const { rows, total, loading, error, params, setParams, reload } = useList(
-    handoverApi.getHistory,
-    {
-      page: 1,
-      limit: 20,
-      search: '',
-      fromDate: '',
-      toDate: '',
-    },
+  const { rows, total, loading, error, params, setParams, reload } = useList(getHandoverHistory, {
+    page: 1,
+    limit: 20,
+    search: '',
+    fromDate: '',
+    toDate: '',
+  });
+
+  const invalidDateRange = Boolean(
+    params.fromDate && params.toDate && params.fromDate > params.toDate,
   );
 
   const tableRows = rows.map((row) => ({
@@ -103,6 +112,8 @@ export default function HandoverHistory() {
           size="small"
           value={params.fromDate || ''}
           onChange={(event) => setParams({ fromDate: event.target.value })}
+          error={invalidDateRange}
+          helperText={invalidDateRange ? 'From Date cannot be later than To Date' : ''}
           slotProps={{
             inputLabel: { shrink: true },
           }}
