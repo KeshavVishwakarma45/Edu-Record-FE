@@ -1,3 +1,5 @@
+import HandoverPage from '@/pages/handover/HandoverPage';
+import ClearancePage from '@/pages/clearance/ClearancePage';
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined';
@@ -68,15 +70,15 @@ export const appRoutes = [
   },
   {
     path: '/handover',
-    element: <ComingSoonPage title="Hand-over" srsIds="HND-01 to HND-08" />,
+    element: <HandoverPage />,
     permission: PERMISSIONS.HANDOVER_ISSUE,
-    menu: { label: 'Hand-over', icon: HandshakeOutlinedIcon, comingSoon: true },
+    menu: { label: 'Hand-over', icon: HandshakeOutlinedIcon },
   },
   {
     path: '/clearance',
-    element: <ComingSoonPage title="Clearance" srsIds="CLR-01 to CLR-05" />,
+    element: <ClearancePage />,
     permission: PERMISSIONS.CLEARANCE_VIEW,
-    menu: { label: 'Clearance', icon: FactCheckOutlinedIcon, comingSoon: true },
+    menu: { label: 'Clearance', icon: FactCheckOutlinedIcon },
   },
   {
     path: '/tc',
