@@ -208,6 +208,7 @@ export default function RolesPage() {
             ? 'Roles of every institute and unit'
             : `Roles of ${owner ?? 'this institute'}`
         }
+        backTo="/"
         actions={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEditing(NEW_ROLE)}>
             Add role

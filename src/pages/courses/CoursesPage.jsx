@@ -263,6 +263,7 @@ export default function CoursesPage({ startWithAddDialog = false }) {
             ? 'Courses of every institute'
             : `Courses offered by ${selectedInstitute?.name ?? 'this institute'}`
         }
+        backTo="/"
         actions={
           canWrite && (
             <Button

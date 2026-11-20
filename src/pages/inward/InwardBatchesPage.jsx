@@ -818,6 +818,7 @@ export default function InwardBatchesPage() {
             ? `Inward batches for ${selectedInstitute.name}`
             : 'University document inward batches'
         }
+        backTo="/"
         actions={
           <Button
             variant="contained"

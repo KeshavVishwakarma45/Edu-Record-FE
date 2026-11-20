@@ -241,6 +241,7 @@ export default function UsersPage() {
       <PageHeader
         title="Users"
         subtitle={allInstitutes ? 'Everyone in the organisation' : `Staff of ${owner}`}
+        backTo="/"
         actions={
           <Button
             variant="contained"

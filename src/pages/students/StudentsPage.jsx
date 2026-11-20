@@ -169,6 +169,7 @@ export default function StudentsPage() {
       <PageHeader
         title="Students"
         subtitle="Manage student records"
+        backTo="/"
         actions={
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <BulkImportButton onImported={reloadStudents} />

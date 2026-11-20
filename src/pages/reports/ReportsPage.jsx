@@ -226,6 +226,7 @@ export default function ReportsPage() {
       <PageHeader
         title="Not Received Documents"
         subtitle="View pending documents and manage follow-up details"
+        backTo="/"
       />
 
       <Alert severity="info" sx={{ mb: 2 }}>

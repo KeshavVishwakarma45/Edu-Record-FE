@@ -291,6 +291,7 @@ export default function OrganisationPage() {
       <PageHeader
         title="Organisation"
         subtitle="Institutes, and how they share roles and staff"
+        backTo="/"
         actions={
           <>
             <Button

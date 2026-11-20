@@ -282,7 +282,11 @@ const HandoverPage = () => {
   return (
     <FormProvider {...form}>
       <Box>
-        <PageHeader title="Hand-over" subtitle="Manage and record student document handovers" />
+        <PageHeader
+          title="Hand-over"
+          subtitle="Manage and record student document handovers"
+          backTo="/"
+        />
 
         <Paper sx={{ mt: 3 }}>
           <Tabs

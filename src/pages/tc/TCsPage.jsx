@@ -303,6 +303,7 @@ export default function TCsPage() {
       <PageHeader
         title="Transfer Certificates"
         subtitle="Manage TC drafts, approvals and student handovers"
+        backTo="/"
         actions={
           canCreate && (
             <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>

@@ -192,8 +192,11 @@ const StudentProfilePage = () => {
 
   return (
     <Box>
-      <PageHeader title="Student Profile" subtitle="View and manage student information" />
-
+      <PageHeader
+        title="Student Profile"
+        subtitle="View and manage student information"
+        backTo="/students"
+      />
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress />

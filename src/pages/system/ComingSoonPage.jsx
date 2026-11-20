@@ -8,7 +8,11 @@ export default function ComingSoonPage({ title, srsIds }) {
     <>
       <PageHeader title={title} />
       <Paper>
-        <EmptyState title="Coming soon" description={`This page is being built (SRS ${srsIds}).`} />
+        <EmptyState
+          title="Coming soon"
+          description={`This page is being built (SRS ${srsIds}).`}
+          backTo="/"
+        />
       </Paper>
     </>
   );
