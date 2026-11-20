@@ -7,6 +7,14 @@ export const studentsApi = {
 
   create: (data, instituteId) => api.post('/students', data, inInstitute(instituteId)).then(unwrap),
 
+  // Edit existing student
+  update: (id, data, instituteId) =>
+    api.patch(`/students/${id}`, data, inInstitute(instituteId)).then(unwrap),
+
+  // Soft delete student
+  remove: (id, instituteId) => api.delete(`/students/${id}`, inInstitute(instituteId)).then(unwrap),
+
+  // Upload or update student photo
   uploadPhoto: (id, file, instituteId) => {
     const formData = new FormData();
     formData.append('photo', file);

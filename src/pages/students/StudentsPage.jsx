@@ -3,6 +3,7 @@ import { coursesApi } from '@/api/courses';
 
 import { useState } from 'react';
 import AddIcon from '@mui/icons-material/Add';
+import { STUDENT_STATUS_LIST } from '@/constants/statuses';
 
 import PageHeader from '@/components/PageHeader';
 import DataTable from '@/components/DataTable';
@@ -19,7 +20,7 @@ import FormPhotoUpload from '@/components/form/FormPhotoUpload';
 import StatusChip from '@/components/StatusChip';
 import { studentsApi } from '@/api/students';
 
-import { Box, Button } from '@mui/material';
+import { Box, Button, MenuItem, TextField } from '@mui/material';
 import BulkImportButton from './BulkImportButton';
 import { useNavigate } from 'react-router-dom';
 
@@ -114,6 +115,7 @@ export default function StudentsPage() {
     limit: 10,
     sort: 'createdAt',
     search: '',
+    status: '',
   });
 
   const {
@@ -177,6 +179,24 @@ export default function StudentsPage() {
           </Box>
         }
       />
+      <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        <TextField
+          select
+          label="Filter by Status"
+          value={tableParams.status ?? ''}
+          onChange={(event) => setTableParams({ status: event.target.value })}
+          size="small"
+          sx={{ minWidth: 200 }}
+        >
+          <MenuItem value="">All Statuses</MenuItem>
+
+          {STUDENT_STATUS_LIST.map((status) => (
+            <MenuItem key={status} value={status}>
+              {status}
+            </MenuItem>
+          ))}
+        </TextField>
+      </Box>
 
       <DataTable
         columns={columns}

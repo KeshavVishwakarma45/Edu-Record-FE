@@ -286,7 +286,11 @@ export default function ReportsPage() {
                   label="Specify Other Reason"
                   value={otherReason}
                   onChange={(event) => setOtherReason(event.target.value)}
-                  inputProps={{ maxLength: 250 }}
+                  slotProps={{
+                    htmlInput: {
+                      maxLength: 250,
+                    },
+                  }}
                   multiline
                   minRows={2}
                   helperText={`${otherReason.length}/250 characters`}
