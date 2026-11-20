@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Alert,
   Box,
@@ -319,6 +319,7 @@ export default function DashboardPage() {
   const { selectedInstitute } = useAuth();
 
   const instituteId = selectedInstitute?._id || selectedInstitute?.id || 'all';
+  const previousInstituteId = useRef(instituteId);
 
   const instituteName = selectedInstitute?.name || 'All institutes';
 
@@ -352,6 +353,23 @@ export default function DashboardPage() {
       setAttentionLoading(true);
       setInwardLoading(true);
       setTcLoading(true);
+
+      const instituteChanged = previousInstituteId.current !== instituteId;
+
+      if (instituteChanged) {
+        previousInstituteId.current = instituteId;
+
+        setSummary(null);
+        setAttention([]);
+        setAttentionTotal(0);
+        setInwardRows([]);
+        setInwardTotal(0);
+        setTcRows([]);
+        setTcTotal(0);
+
+        setInwardPage(0);
+        setTcPage(0);
+      }
 
       setSummaryError('');
       setAttentionError('');

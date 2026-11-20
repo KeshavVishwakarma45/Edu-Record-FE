@@ -357,18 +357,10 @@ export default function InwardBatchesPage() {
       const results = await Promise.all(
         batches.map(async (batch) => {
           try {
-            const counts = await inwardApi.getCounts(batch._id);
-
+            const counts = await inwardApi.getCounts(batch._id, batch.instituteId);
             return [batch._id, counts];
           } catch {
-            return [
-              batch._id,
-              {
-                expected: 0,
-                received: 0,
-                missing: 0,
-              },
-            ];
+            return [batch._id, { expected: 0, received: 0, missing: 0 }];
           }
         }),
       );
@@ -386,13 +378,13 @@ export default function InwardBatchesPage() {
   }, [list.rows]);
 
   const loadMissingDocuments = useCallback(
-    async (batchId) => {
+    async (batchId, instituteId) => {
       if (!batchId) {
         return [];
       }
 
       try {
-        const result = await inwardApi.getMissing(batchId);
+        const result = await inwardApi.getMissing(batchId, instituteId);
         return getRows(result);
       } catch (error) {
         notify.error(error);
@@ -407,12 +399,13 @@ export default function InwardBatchesPage() {
 
     const load = async () => {
       if (!selectedBatch?._id) {
+        setMissingRows([]);
         return;
       }
 
       setMissingLoading(true);
 
-      const rows = await loadMissingDocuments(selectedBatch._id);
+      const rows = await loadMissingDocuments(selectedBatch._id, selectedBatch.instituteId);
 
       if (active) {
         setMissingRows(rows);
@@ -425,7 +418,7 @@ export default function InwardBatchesPage() {
     return () => {
       active = false;
     };
-  }, [selectedBatch?._id, loadMissingDocuments]);
+  }, [selectedBatch?._id, selectedBatch?.instituteId, loadMissingDocuments]);
 
   // Load university options
   useEffect(() => {
@@ -474,10 +467,10 @@ export default function InwardBatchesPage() {
       setStudentsError('');
 
       try {
-        const result = await inwardApi.getStudents(selectedBatch._id);
+        const result = await inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId);
 
         if (active) {
-          setExpectedStudents(mapStudentRecords(result));
+          setExpectedStudents(mapStudentRecords(getRows(result)));
         }
       } catch (error) {
         if (active) {
@@ -498,7 +491,7 @@ export default function InwardBatchesPage() {
     return () => {
       active = false;
     };
-  }, [selectedBatch?._id, notify]);
+  }, [selectedBatch?._id, selectedBatch?.instituteId, notify]);
 
   // Filter students
   const filteredStudents = expectedStudents.filter((student) =>
@@ -543,7 +536,7 @@ export default function InwardBatchesPage() {
           : {}),
       };
 
-      const result = await inwardApi.create(payload);
+      const result = await inwardApi.create(payload, values.instituteId);
 
       setDialogOpen(false);
       setCoveringLetter(null);
@@ -628,7 +621,12 @@ export default function InwardBatchesPage() {
 
     try {
       if (isEditingReceipt) {
-        await inwardApi.updateReceipt(selectedBatch._id, selectedStudent._id, payload);
+        await inwardApi.updateReceipt(
+          selectedBatch._id,
+          selectedStudent._id,
+          payload,
+          selectedBatch.instituteId,
+        );
 
         notify.success('Receipt updated successfully');
       } else {
@@ -638,10 +636,14 @@ export default function InwardBatchesPage() {
           throw new Error('Student ID is missing');
         }
 
-        await inwardApi.receive(selectedBatch._id, {
-          studentId,
-          ...payload,
-        });
+        await inwardApi.receive(
+          selectedBatch._id,
+          {
+            studentId,
+            ...payload,
+          },
+          selectedBatch.instituteId,
+        );
 
         notify.success('Document received successfully');
       }
@@ -655,9 +657,9 @@ export default function InwardBatchesPage() {
       setFileNo('');
 
       // Refresh students after successful action
-      const result = await inwardApi.getStudents(selectedBatch._id);
+      const result = await inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId);
 
-      setExpectedStudents(mapStudentRecords(result));
+      setExpectedStudents(mapStudentRecords(getRows(result)));
 
       // Refresh batch list and counts
       await list.reload();
@@ -721,7 +723,12 @@ export default function InwardBatchesPage() {
       if (editingMissing.missingDetails || editingMissing.missingId) {
         const missingId = getMissingId(editingMissing);
 
-        await inwardApi.updateMissing(selectedBatch._id, missingId, payload);
+        await inwardApi.updateMissing(
+          selectedBatch._id,
+          missingId,
+          payload,
+          selectedBatch.instituteId,
+        );
 
         notify.success('Missing details updated successfully');
       } else {
@@ -731,10 +738,14 @@ export default function InwardBatchesPage() {
           throw new Error('Student ID is missing');
         }
 
-        await inwardApi.markMissing(selectedBatch._id, {
-          studentId,
-          ...payload,
-        });
+        await inwardApi.markMissing(
+          selectedBatch._id,
+          {
+            studentId,
+            ...payload,
+          },
+          selectedBatch.instituteId,
+        );
 
         notify.success('Document marked as missing');
       }
@@ -743,8 +754,8 @@ export default function InwardBatchesPage() {
       setEditingMissing(null);
 
       const [studentsResult, missingResult] = await Promise.all([
-        inwardApi.getStudents(selectedBatch._id),
-        inwardApi.getMissing(selectedBatch._id),
+        inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId),
+        inwardApi.getMissing(selectedBatch._id, selectedBatch.instituteId),
       ]);
 
       setExpectedStudents(mapStudentRecords(getRows(studentsResult)));

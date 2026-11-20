@@ -163,6 +163,8 @@ export default function TCsPage() {
   };
 
   const handleCreate = async () => {
+    if (!canCreate) return;
+
     if (!form.studentName.trim() || !form.admissionNo.trim() || !form.course.trim()) {
       notify.error('Student name, admission number and course are required');
       return;
@@ -180,7 +182,7 @@ export default function TCsPage() {
   };
 
   const handleSaveDraft = async () => {
-    if (!selectedTC) return;
+    if (!selectedTC || !canCreate) return;
 
     try {
       const updated = await updateRequest.run(selectedTC._id, {
@@ -197,8 +199,7 @@ export default function TCsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedTC) return;
-
+    if (!selectedTC || !canCreate) return;
     try {
       await submitRequest.run(selectedTC._id);
       notify.success('TC submitted for approval');
@@ -223,7 +224,9 @@ export default function TCsPage() {
   };
 
   const handleReject = async () => {
-    if (!selectedTC || !rejectionRemark.trim()) {
+    if (!selectedTC || !canApprove) return;
+
+    if (!rejectionRemark.trim()) {
       notify.error('Rejection remark is required');
       return;
     }
@@ -394,7 +397,11 @@ export default function TCsPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={createRequest.loading}>
+          <Button
+            variant="contained"
+            onClick={handleCreate}
+            disabled={!canCreate || createRequest.loading}
+          >
             Save Draft
           </Button>
         </DialogActions>
@@ -473,10 +480,10 @@ export default function TCsPage() {
 
           {selectedStatus === 'draft' && (
             <>
-              <Button onClick={handleSaveDraft} disabled={busy}>
+              <Button onClick={handleSaveDraft} disabled={!canCreate || busy}>
                 Save Changes
               </Button>
-              <Button variant="contained" onClick={handleSubmit} disabled={busy}>
+              <Button variant="contained" onClick={handleSubmit} disabled={!canCreate || busy}>
                 Submit for Approval
               </Button>
             </>
