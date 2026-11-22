@@ -21,6 +21,9 @@ import AccountsDues from './AccountsDues';
 import { clearanceApi } from '../../api/clearance';
 import { useAuth } from '@/hooks/useAuth';
 import { PERMISSIONS } from '../../constants/permissions';
+import Autocomplete from '@mui/material/Autocomplete';
+import { studentsApi } from '../../api/students';
+import { useList } from '@/hooks/useList';
 
 // Initial TC Application Form
 const initialForm = {
@@ -92,7 +95,25 @@ const getStatusChipSx = (status) => {
 
 export default function ClearancePage() {
   const [activeTab, setActiveTab] = useState(0);
+
   const [form, setForm] = useState(initialForm);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [studentSearch, setStudentSearch] = useState('');
+
+  const {
+    rows: studentOptions,
+    loading: studentsLoading,
+    error: studentsError,
+    setParams: setStudentParams,
+  } = useList(studentsApi.list, {
+    page: 1,
+    limit: 10,
+    search: '',
+  });
+
+  useEffect(() => {
+    setStudentParams({ search: studentSearch });
+  }, [studentSearch, setStudentParams]);
 
   const [loading, setLoading] = useState(false);
   const [queueLoading, setQueueLoading] = useState(false);
@@ -105,15 +126,33 @@ export default function ClearancePage() {
 
   const [message, setMessage] = useState(null);
 
-  const { can, isSuperAdmin } = useAuth();
+  const { can, isSuperAdmin, selectedInstitute } = useAuth();
+  const [previousInstituteId, setPreviousInstituteId] = useState(selectedInstitute?.id);
+
+  if (previousInstituteId !== selectedInstitute?.id) {
+    setPreviousInstituteId(selectedInstitute?.id);
+    setSelectedStudent(null);
+    setStudentSearch('');
+    setForm((prev) => ({ ...prev, studentId: '' }));
+  }
 
   const canApplyTC = can(PERMISSIONS.TC_APPLY);
   const canViewClearance = can(PERMISSIONS.CLEARANCE_VIEW);
   const canActClearance = can(PERMISSIONS.CLEARANCE_ACT);
 
+  const [previousCanActClearance, setPreviousCanActClearance] = useState(canActClearance);
+
+  if (previousCanActClearance !== canActClearance) {
+    setPreviousCanActClearance(canActClearance);
+
+    if (!canActClearance && activeTab === 2) {
+      setActiveTab(0);
+    }
+  }
+
   // Fetch TC Applications
   const fetchApplications = useCallback(async () => {
-    if (!canViewClearance) return;
+    if (!canActClearance) return;
 
     try {
       setApplicationsLoading(true);
@@ -129,7 +168,7 @@ export default function ClearancePage() {
     } finally {
       setApplicationsLoading(false);
     }
-  }, [canViewClearance]);
+  }, [canActClearance]);
 
   // Fetch Department Queue
   const fetchDepartmentQueue = useCallback(async () => {
@@ -181,7 +220,7 @@ export default function ClearancePage() {
 
   // Fetch Pending Dues
   const fetchPendingDues = useCallback(async () => {
-    if (!canViewClearance) return;
+    if (!canActClearance) return;
 
     try {
       setDuesLoading(true);
@@ -197,7 +236,7 @@ export default function ClearancePage() {
     } finally {
       setDuesLoading(false);
     }
-  }, [canViewClearance]);
+  }, [canActClearance]);
 
   // Fetch data according to selected tab
   useEffect(() => {
@@ -218,21 +257,6 @@ export default function ClearancePage() {
     return () => {
       isActive = false;
     };
-  }, [activeTab, canViewClearance, fetchApplications, fetchDepartmentQueue, fetchPendingDues]);
-
-  // Fetch data according to selected tab
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (activeTab === 0 && canViewClearance) {
-        fetchApplications();
-      } else if (activeTab === 1 && canViewClearance) {
-        fetchDepartmentQueue();
-      } else if (activeTab === 2 && canViewClearance) {
-        fetchPendingDues();
-      }
-    }, 0);
-
-    return () => clearTimeout(timer);
   }, [activeTab, canViewClearance, fetchApplications, fetchDepartmentQueue, fetchPendingDues]);
 
   // Department Status Update
@@ -257,6 +281,14 @@ export default function ClearancePage() {
 
   // Accounts Dues Update
   const handleUpdateDues = async (item, values) => {
+    if (values.amountDue === '' || values.amountDue === null || values.amountDue === undefined) {
+      setMessage({
+        type: 'error',
+        text: 'Please enter an amount due.',
+      });
+      return;
+    }
+
     const amountDue = Number(values.amountDue);
 
     if (!Number.isFinite(amountDue) || amountDue < 0) {
@@ -315,12 +347,22 @@ export default function ClearancePage() {
       documentsEnclosed: { ...initialForm.documentsEnclosed },
       declarations: { ...initialForm.declarations },
     });
+
+    setSelectedStudent(null);
+    setStudentSearch('');
   };
 
   // Submit TC Application
   const handleSubmit = async (event) => {
     event.preventDefault();
     setMessage(null);
+    if (!selectedStudent?._id) {
+      setMessage({
+        type: 'error',
+        text: 'Please select a student before submitting.',
+      });
+      return;
+    }
 
     const payload = {
       studentId: form.studentId.trim(),
@@ -344,11 +386,17 @@ export default function ClearancePage() {
     try {
       setLoading(true);
 
-      await clearanceApi.createApplication(payload);
+      const result = await clearanceApi.createApplication(payload);
+
+      const createdItems = Array.isArray(result?.clearanceItems) ? result.clearanceItems : [];
+
+      const departmentCount = createdItems.length;
 
       setMessage({
         type: 'success',
-        text: 'TC application submitted successfully.',
+        text: `TC application submitted successfully. Initial status: ${
+          result?.overallStatus || 'PENDING'
+        }. Clearance requests created for ${departmentCount} department(s).`,
       });
 
       handleReset();
@@ -407,7 +455,7 @@ export default function ClearancePage() {
         >
           <Tab label="TC Application" />
           <Tab label="Department Queue" />
-          <Tab label="Accounts Dues" />
+          <Tab label="Accounts Dues" disabled={!canActClearance} />
         </Tabs>
       </Paper>
 
@@ -443,14 +491,66 @@ export default function ClearancePage() {
                 gap: 2.5,
               }}
             >
-              <TextField
+              <Autocomplete
                 fullWidth
-                required
-                label="Student ID"
-                name="studentId"
-                value={form.studentId}
-                onChange={handleChange}
-                helperText="Enter the student's MongoDB record ID."
+                options={studentOptions}
+                value={selectedStudent}
+                loading={studentsLoading}
+                inputValue={
+                  selectedStudent
+                    ? `${selectedStudent.name || ''} (${selectedStudent.scholarNo || selectedStudent.enrollmentNo || 'No Scholar No.'})`
+                    : studentSearch
+                }
+                filterOptions={(options) => options}
+                getOptionLabel={(option) =>
+                  `${option.name || ''} (${option.scholarNo || option.enrollmentNo || 'No Scholar No.'})`
+                }
+                isOptionEqualToValue={(option, value) => option._id === value._id}
+                onInputChange={(event, value, reason) => {
+                  if (reason === 'input') {
+                    setStudentSearch(value);
+                    setSelectedStudent(null);
+                    setForm((prev) => ({ ...prev, studentId: '' }));
+                  }
+
+                  if (reason === 'clear') {
+                    setStudentSearch('');
+                    setSelectedStudent(null);
+                    setForm((prev) => ({ ...prev, studentId: '' }));
+                  }
+                }}
+                onChange={(event, student) => {
+                  setSelectedStudent(student);
+                  setForm((prev) => ({
+                    ...prev,
+                    studentId: student?._id || '',
+                  }));
+                }}
+                noOptionsText={studentsError ? 'Unable to load students' : 'No students found'}
+                renderOption={(props, student) => (
+                  <Box component="li" {...props} key={student._id}>
+                    <Box>
+                      <Typography fontWeight={600}>{student.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Father&apos;s Name: {student.fatherName || '—'} | Scholar No.:{' '}
+                        {student.scholarNo || '—'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Select Student"
+                    required
+                    placeholder="Search by name, scholar number or enrollment number"
+                    helperText={
+                      studentsError
+                        ? 'Student list could not be loaded. Please refresh and try again.'
+                        : 'Search and select the student applying for a TC.'
+                    }
+                  />
+                )}
               />
 
               <TextField
@@ -725,7 +825,7 @@ export default function ClearancePage() {
       )}
 
       {/* Accounts Dues */}
-      {activeTab === 2 && (
+      {activeTab === 2 && canActClearance && (
         <AccountsDues
           items={duesItems}
           loading={duesLoading}
