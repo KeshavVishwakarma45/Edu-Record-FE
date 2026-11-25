@@ -260,9 +260,12 @@ export default function ClearancePage() {
   }, [activeTab, canViewClearance, fetchApplications, fetchDepartmentQueue, fetchPendingDues]);
 
   // Department Status Update
-  const handleDepartmentStatusChange = async (item, status) => {
+  // Department Status Update
+  const handleDepartmentStatusChange = async (item, status, remark) => {
     try {
-      await clearanceApi.updateItem(item._id, { status });
+      const payload = status === 'NOT_CLEAR' ? { status, remark } : { status, remark: '' };
+
+      await clearanceApi.updateItem(item._id, payload);
 
       setMessage({
         type: 'success',
@@ -311,6 +314,7 @@ export default function ClearancePage() {
       });
 
       await fetchPendingDues();
+      await fetchDepartmentQueue();
     } catch (error) {
       setMessage({
         type: 'error',
@@ -820,6 +824,9 @@ export default function ClearancePage() {
             !isSuperAdmin && canViewClearance && canActClearance
               ? handleDepartmentStatusChange
               : undefined
+          }
+          onUpdateDues={
+            !isSuperAdmin && canViewClearance && canActClearance ? handleUpdateDues : undefined
           }
         />
       )}
