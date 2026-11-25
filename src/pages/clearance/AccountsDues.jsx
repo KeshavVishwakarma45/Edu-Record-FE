@@ -31,7 +31,7 @@ export default function AccountsDues({ items = [], onUpdateDues, loading = false
     const values = dues[item._id] || {};
 
     onUpdateDues?.(item, {
-      amountDue: Number(values.amountDue ?? item.amountDue ?? 0),
+      amountDue: values.amountDue ?? item.amountDue ?? 0,
       remark: values.remark ?? item.remark ?? '',
     });
   };
@@ -98,7 +98,6 @@ export default function AccountsDues({ items = [], onUpdateDues, loading = false
                     type="number"
                     value={dues[item._id]?.amountDue ?? item.amountDue ?? 0}
                     onChange={(e) => handleChange(item._id, 'amountDue', e.target.value)}
-                    inputProps={{ min: 0 }}
                     sx={{ width: 120 }}
                   />
                 </TableCell>

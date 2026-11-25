@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { useAuth } from '@/hooks/useAuth';
+import { useNotify } from '@/hooks/useNotify';
 
 import {
   Alert,
@@ -9,6 +11,9 @@ import {
   Chip,
   Divider,
   FormControlLabel,
+  Pagination,
+  ClickAwayListener,
+  Popper,
   Paper,
   Skeleton,
   Stack,
@@ -18,7 +23,6 @@ import {
   Typography,
 } from '@mui/material';
 
-import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import CameraAltOutlinedIcon from '@mui/icons-material/CameraAltOutlined';
@@ -33,33 +37,36 @@ import PageHeader from '@/components/PageHeader';
 import StatusChip from '@/components/StatusChip';
 import { DOCUMENT_STATUSES } from '@/constants/statuses';
 import { useList } from '@/hooks/useList';
-import { useNotify } from '@/hooks/useNotify';
 import { useRequest } from '@/hooks/useRequest';
 
 import HandoverHistory from './HandoverHistory';
 
 const MB = 1024 * 1024;
-const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const MOBILE_PATTERN = /^[6-9]\d{9}$/;
 const EMPTY_RECEIVER = { receiverName: '', mobile: '' };
 
-// Hand-over of documents to the student (SRS HND-02, HND-03, HND-04, HND-06).
-// Only a "Self" hand-over for now: the authorised-person affidavit is Phase 2 (HND-05).
-// The server sets the date, time and issuing staff.
-const HandoverPage = () => {
+const HandoverPageContent = () => {
+  const { selectedInstitute, allInstitutes } = useAuth();
   const notify = useNotify();
   const latestStudentId = useRef(null);
+  const [searchAnchorEl, setSearchAnchorEl] = useState(null);
 
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState('');
+  const [studentDialogOpen, setStudentDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [photo, setPhoto] = useState(null);
   const [signedReceipt, setSignedReceipt] = useState(null);
   const [pending, setPending] = useState(null);
+  const [handoverSubmitting, setHandoverSubmitting] = useState(false);
 
-  // Receiver photo preview
+  const submissionInProgress = useRef(false);
+  const uploadedPhotoId = useRef(null);
+  const uploadedSignatureId = useRef(null);
+
   const photoPreview = useMemo(() => (photo ? URL.createObjectURL(photo) : ''), [photo]);
 
   useEffect(() => {
@@ -69,13 +76,21 @@ const HandoverPage = () => {
       }
     };
   }, [photoPreview]);
+
   const form = useForm({ defaultValues: EMPTY_RECEIVER });
 
-  const receiverName = useWatch({ control: form.control, name: 'receiverName' }) ?? '';
+  const receiverName =
+    useWatch({
+      control: form.control,
+      name: 'receiverName',
+    }) ?? '';
 
-  const receiverMobile = useWatch({ control: form.control, name: 'mobile' }) ?? '';
+  const receiverMobile =
+    useWatch({
+      control: form.control,
+      name: 'mobile',
+    }) ?? '';
 
-  // Signed receipt preview
   const signedReceiptPreview = useMemo(
     () => (signedReceipt?.type.startsWith('image/') ? URL.createObjectURL(signedReceipt) : ''),
     [signedReceipt],
@@ -91,17 +106,23 @@ const HandoverPage = () => {
 
   const {
     rows: studentRows,
+    total: studentTotal,
     loading: studentsLoading,
     error: studentsError,
     params: studentParams,
     setParams: setStudentParams,
     reload: reloadStudents,
-  } = useList(studentsApi.list, { page: 1, limit: 10, search: '' });
+  } = useList(studentsApi.list, {
+    page: 1,
+    limit: 10,
+    search: '',
+  });
+
+  const studentTotalPages = Math.ceil(studentTotal / studentParams.limit);
 
   const documentsRequest = useRequest(handoverApi.listDocuments);
   const createRequest = useRequest(handoverApi.create);
 
-  // Only documents in custody can be handed over
   const availableDocuments = documents.filter(
     (document) => document.status === DOCUMENT_STATUSES.IN_CUSTODY,
   );
@@ -138,40 +159,70 @@ const HandoverPage = () => {
     latestStudentId.current = student._id;
 
     try {
-      const { rows } = await documentsRequest.run(student._id, student.instituteId);
+      const { rows } = await documentsRequest.run(student._id, selectedInstitute.id);
 
       if (latestStudentId.current === student._id) {
         setDocuments(rows);
       }
     } catch {
-      // The error is shown by documentsRequest.error below, with a Retry button
+      // Error is displayed through documentsRequest.error.
     }
   };
 
   const resetPage = () => {
     latestStudentId.current = null;
+    uploadedPhotoId.current = null;
+    uploadedSignatureId.current = null;
+
     setSearch('');
+    setStudentDialogOpen(false);
     setStudentParams({ search: '' });
     setSelectedStudent(null);
     setDocuments([]);
     setSelectedDocumentIds([]);
     setPhoto(null);
     setSignedReceipt(null);
+
     form.reset(EMPTY_RECEIVER);
+    setPending(null);
   };
 
-  const handleSearch = () => {
+  // Live search with compact dropdown.
+  const handleSearchChange = (event) => {
+    const value = event.target.value;
+
+    setSearch(value);
+    setStudentDialogOpen(Boolean(value.trim()));
+
     latestStudentId.current = null;
+    uploadedPhotoId.current = null;
+    uploadedSignatureId.current = null;
+
     setSelectedStudent(null);
     setDocuments([]);
     setSelectedDocumentIds([]);
     setPhoto(null);
     setSignedReceipt(null);
-    setStudentParams({ search: search.trim() });
+
+    form.reset(EMPTY_RECEIVER);
+
+    setStudentParams({
+      search: value.trim(),
+    });
   };
 
   const handleStudentSelection = (student) => {
+    if (allInstitutes || !selectedInstitute?.id) {
+      notify.error('Please select one institute first');
+      return;
+    }
+
+    uploadedPhotoId.current = null;
+    uploadedSignatureId.current = null;
+
     setSelectedStudent(student);
+    setStudentDialogOpen(false);
+
     setDocuments([]);
     setSelectedDocumentIds([]);
     setPhoto(null);
@@ -199,7 +250,6 @@ const HandoverPage = () => {
     );
   };
 
-  // Same limits as the server: images up to 2 MB, PDFs up to 5 MB
   const pickFile = (event, { allowPdf, onPick }) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -226,56 +276,67 @@ const HandoverPage = () => {
   };
 
   const handleConfirm = async () => {
+    if (submissionInProgress.current || !pending || !selectedStudent) return;
+
+    if (allInstitutes || !selectedInstitute?.id) {
+      notify.error('Please select one institute first');
+      return;
+    }
+    submissionInProgress.current = true;
+    setHandoverSubmitting(true);
+
     try {
-      if (!signedReceipt) {
-        throw new Error('Please upload the signed receipt.');
+      if (!photo || !signedReceipt) {
+        throw new Error('Please upload the receiver photo and signed receipt.');
       }
 
-      // Step 1: Upload receiver photo
-      const photoResponse = await handoverApi.uploadPhoto(
-        selectedStudent._id,
-        photo,
-        selectedStudent.instituteId,
-      );
+      if (!uploadedPhotoId.current) {
+        const photoResponse = await handoverApi.uploadPhoto(
+          selectedStudent._id,
+          photo,
+          selectedInstitute.id,
+        );
 
-      const receiverPhotoId = photoResponse?.fileId;
+        if (!photoResponse?.fileId) {
+          throw new Error('Receiver photo upload failed. File ID not received.');
+        }
 
-      if (!receiverPhotoId) {
-        throw new Error('Receiver photo upload failed. File ID not received.');
+        uploadedPhotoId.current = photoResponse.fileId;
       }
 
-      // Step 2: Upload mandatory signed receipt
-      const signatureResponse = await handoverApi.uploadSignature(
-        selectedStudent._id,
-        signedReceipt,
-        selectedStudent.instituteId,
-      );
+      if (!uploadedSignatureId.current) {
+        const signatureResponse = await handoverApi.uploadSignature(
+          selectedStudent._id,
+          signedReceipt,
+          selectedInstitute.id,
+        );
 
-      const signedReceiptId = signatureResponse?.fileId;
+        if (!signatureResponse?.fileId) {
+          throw new Error('Signed receipt upload failed. File ID not received.');
+        }
 
-      if (!signedReceiptId) {
-        throw new Error('Signed receipt upload failed. File ID not received.');
+        uploadedSignatureId.current = signatureResponse.fileId;
       }
 
-      // Step 3: Submit handover using uploaded file IDs
       const handoverData = {
         studentId: selectedStudent._id,
         documentIds: selectedDocumentIds,
         receiverType: 'SELF',
         receiverName: pending.receiverName.trim(),
         receiverMobile: pending.mobile.trim(),
-        receiverPhotoId,
-        signedReceiptId,
+        receiverPhotoId: uploadedPhotoId.current,
+        signedReceiptId: uploadedSignatureId.current,
       };
 
-      await createRequest.run(handoverData, selectedStudent.instituteId);
+      await createRequest.run(handoverData, selectedInstitute.id);
 
       notify.success('Hand-over completed');
       resetPage();
     } catch (error) {
       notify.error(error);
     } finally {
-      setPending(null);
+      submissionInProgress.current = false;
+      setHandoverSubmitting(false);
     }
   };
 
@@ -304,7 +365,7 @@ const HandoverPage = () => {
             {activeTab === 0 && (
               <Stack spacing={3}>
                 {/* Student Search */}
-                <Paper sx={{ p: 3 }}>
+                <Paper sx={{ p: 2.5 }}>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
                     <PersonOutlineOutlinedIcon color="primary" />
                     <Typography variant="h6" sx={{ lineHeight: 1.4 }}>
@@ -312,103 +373,21 @@ const HandoverPage = () => {
                     </Typography>
                   </Stack>
 
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <Box ref={setSearchAnchorEl}>
                     <TextField
                       fullWidth
                       size="small"
                       label="Search Student"
                       placeholder="Enter name, scholar number or roll number"
                       value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') handleSearch();
+                      onChange={handleSearchChange}
+                      onFocus={() => {
+                        if (search.trim() && !selectedStudent) {
+                          setStudentDialogOpen(true);
+                        }
                       }}
                     />
-
-                    <Button
-                      variant="contained"
-                      startIcon={<SearchOutlinedIcon />}
-                      disabled={!search.trim() || studentsLoading}
-                      onClick={handleSearch}
-                      sx={{ minWidth: 130 }}
-                    >
-                      {studentsLoading ? 'Searching...' : 'Search'}
-                    </Button>
-                  </Stack>
-
-                  {studentParams.search && (
-                    <Box sx={{ mt: 2 }}>
-                      {studentsLoading ? (
-                        <Alert severity="info">Searching students...</Alert>
-                      ) : studentsError ? (
-                        <ErrorState error={studentsError} onRetry={reloadStudents} />
-                      ) : studentRows.length > 0 ? (
-                        <>
-                          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                            Search Results
-                          </Typography>
-
-                          <Stack spacing={1}>
-                            {studentRows.map((student) => (
-                              <Paper
-                                key={student._id}
-                                variant="outlined"
-                                sx={{
-                                  p: 2,
-                                  borderColor:
-                                    selectedStudent?._id === student._id
-                                      ? 'primary.main'
-                                      : 'divider',
-                                }}
-                              >
-                                <Button
-                                  fullWidth
-                                  onClick={() => handleStudentSelection(student)}
-                                  sx={{
-                                    justifyContent: 'flex-start',
-                                    textAlign: 'left',
-                                    textTransform: 'none',
-                                  }}
-                                >
-                                  <Box>
-                                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                                      {student.name}
-                                    </Typography>
-
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        color: 'text.secondary',
-                                        display: 'block',
-                                      }}
-                                    >
-                                      Scholar No: {student.scholarNo || 'N/A'}
-                                      {' | '}
-                                      Enrollment No: {student.enrollmentNo || 'N/A'}
-                                    </Typography>
-
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        color: 'text.secondary',
-                                        display: 'block',
-                                      }}
-                                    >
-                                      Roll No: {student.rollNo || 'N/A'}
-                                      {' | '}
-                                      Mobile: {student.mobile || 'N/A'}
-                                    </Typography>
-                                  </Box>
-                                </Button>
-                              </Paper>
-                            ))}
-                          </Stack>
-                        </>
-                      ) : (
-                        <Alert severity="warning">No students found for this search.</Alert>
-                      )}
-                    </Box>
-                  )}
+                  </Box>
 
                   {selectedStudent && (
                     <Alert severity="success" sx={{ mt: 2 }}>
@@ -418,6 +397,166 @@ const HandoverPage = () => {
                     </Alert>
                   )}
                 </Paper>
+
+                {/* Compact Student Search Dropdown */}
+                <Popper
+                  open={studentDialogOpen}
+                  anchorEl={searchAnchorEl}
+                  placement="bottom-start"
+                  disablePortal={false}
+                  modifiers={[
+                    {
+                      name: 'offset',
+                      options: {
+                        offset: [0, 6],
+                      },
+                    },
+                    {
+                      name: 'flip',
+                      enabled: false,
+                    },
+                    {
+                      name: 'preventOverflow',
+                      options: {
+                        padding: 16,
+                      },
+                    },
+                  ]}
+                  sx={{
+                    zIndex: (theme) => theme.zIndex.modal,
+                    width: searchAnchorEl?.clientWidth || 'auto',
+                    maxWidth: 760,
+                  }}
+                >
+                  <ClickAwayListener
+                    onClickAway={(event) => {
+                      if (searchAnchorEl?.contains(event.target)) {
+                        return;
+                      }
+
+                      setStudentDialogOpen(false);
+                    }}
+                  >
+                    <Paper
+                      elevation={6}
+                      sx={{
+                        width: '100%',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 2,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Box sx={{ px: 1.5, py: 1 }}>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          Search Results
+                        </Typography>
+
+                        <Typography variant="caption" color="text.secondary">
+                          {studentsLoading
+                            ? 'Searching students...'
+                            : `${studentTotal} students found`}
+                        </Typography>
+                      </Box>
+
+                      <Divider />
+
+                      <Box sx={{ p: 1 }}>
+                        {studentsLoading ? (
+                          <Stack spacing={0.75}>
+                            <Skeleton variant="rounded" height={48} />
+                            <Skeleton variant="rounded" height={48} />
+                          </Stack>
+                        ) : studentsError ? (
+                          <ErrorState error={studentsError} onRetry={reloadStudents} />
+                        ) : studentRows.length > 0 ? (
+                          <>
+                            <Stack
+                              spacing={0.75}
+                              sx={{
+                                maxHeight: 320,
+                                overflowY: 'auto',
+                                pr: 0.5,
+                              }}
+                            >
+                              {studentRows.map((student) => (
+                                <Paper
+                                  key={student._id}
+                                  variant="outlined"
+                                  sx={{
+                                    p: 0.5,
+                                    borderColor: 'divider',
+                                    '&:hover': {
+                                      borderColor: 'primary.main',
+                                      bgcolor: 'action.hover',
+                                    },
+                                  }}
+                                >
+                                  <Button
+                                    fullWidth
+                                    size="small"
+                                    onClick={() => handleStudentSelection(student)}
+                                    sx={{
+                                      justifyContent: 'flex-start',
+                                      textAlign: 'left',
+                                      textTransform: 'none',
+                                      py: 0.5,
+                                      px: 0.75,
+                                      minHeight: 'auto',
+                                    }}
+                                  >
+                                    <Box sx={{ minWidth: 0, width: '100%' }}>
+                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                        {student.name}
+                                      </Typography>
+
+                                      <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        display="block"
+                                      >
+                                        Scholar No: {student.scholarNo || 'N/A'}
+                                        {' | '}
+                                        Enrollment No: {student.enrollmentNo || 'N/A'}
+                                      </Typography>
+
+                                      <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        display="block"
+                                      >
+                                        Roll No: {student.rollNo || 'N/A'}
+                                        {' | '}
+                                        Mobile: {student.mobile || 'N/A'}
+                                      </Typography>
+                                    </Box>
+                                  </Button>
+                                </Paper>
+                              ))}
+                            </Stack>
+
+                            {studentTotalPages > 1 && (
+                              <Pagination
+                                count={studentTotalPages}
+                                page={studentParams.page}
+                                onChange={(_event, page) => setStudentParams({ page })}
+                                color="primary"
+                                size="small"
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  mt: 1,
+                                }}
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <Alert severity="warning">No students found for this search.</Alert>
+                        )}
+                      </Box>
+                    </Paper>
+                  </ClickAwayListener>
+                </Popper>
 
                 {/* Documents for hand-over */}
                 <Paper sx={{ p: 3 }}>
@@ -621,7 +760,10 @@ const HandoverPage = () => {
                       onChange={(event) =>
                         pickFile(event, {
                           allowPdf: false,
-                          onPick: setPhoto,
+                          onPick: (file) => {
+                            uploadedPhotoId.current = null;
+                            setPhoto(file);
+                          },
                         })
                       }
                     />
@@ -651,8 +793,10 @@ const HandoverPage = () => {
                         variant="outlined"
                         color="error"
                         size="small"
-                        onClick={() => setPhoto(null)}
-                        sx={{ alignSelf: 'flex-start' }}
+                        onClick={() => {
+                          uploadedPhotoId.current = null;
+                          setPhoto(null);
+                        }}
                       >
                         Remove Photo
                       </Button>
@@ -689,7 +833,10 @@ const HandoverPage = () => {
                       onChange={(event) =>
                         pickFile(event, {
                           allowPdf: true,
-                          onPick: setSignedReceipt,
+                          onPick: (file) => {
+                            uploadedSignatureId.current = null;
+                            setSignedReceipt(file);
+                          },
                         })
                       }
                     />
@@ -734,8 +881,10 @@ const HandoverPage = () => {
                         variant="outlined"
                         color="error"
                         size="small"
-                        onClick={() => setSignedReceipt(null)}
-                        sx={{ alignSelf: 'flex-start' }}
+                        onClick={() => {
+                          uploadedSignatureId.current = null;
+                          setSignedReceipt(null);
+                        }}
                       >
                         Remove Receipt
                       </Button>
@@ -825,13 +974,19 @@ const HandoverPage = () => {
             selectedStudent?.name ?? ''
           } to ${pending?.receiverName?.trim() ?? ''}? This cannot be undone.`}
           confirmLabel="Complete hand-over"
-          loading={createRequest.loading}
+          loading={handoverSubmitting}
           onConfirm={handleConfirm}
           onClose={() => setPending(null)}
         />
       </Box>
     </FormProvider>
   );
+};
+
+const HandoverPage = () => {
+  const { selectedInstitute } = useAuth();
+
+  return <HandoverPageContent key={selectedInstitute?.id ?? 'no-institute'} />;
 };
 
 export default HandoverPage;
