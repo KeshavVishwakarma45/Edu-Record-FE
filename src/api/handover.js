@@ -1,19 +1,20 @@
-import { api, inInstitute, unwrap } from './client';
+import { api, inInstitute, unwrap, unwrapList } from './client';
 
 export const handoverApi = {
-  listDocuments: (studentId, instituteId) =>
-    api
-      .get(`/handover/students/${studentId}/documents`, inInstitute(instituteId))
-      .then((response) => {
-        const data = unwrap(response);
-        const rows = Array.isArray(data?.documents) ? data.documents : [];
+  // Get all documents belonging to a student
+  listStudentDocuments: (studentId, instituteId) =>
+    api.get(`/handover/students/${studentId}/documents`, inInstitute(instituteId)).then(unwrap),
 
-        return {
-          rows,
-          total: rows.length,
-        };
-      }),
+  // Upload receiver photo (JPG / PNG, max 2 MB)
+  uploadReceiverPhoto: (studentId, file, instituteId) => {
+    const formData = new FormData();
+    formData.append('studentId', studentId);
+    formData.append('photo', file);
 
+    return api.post('/handover/upload-photo', formData, inInstitute(instituteId)).then(unwrap);
+  },
+
+  // Upload signed receipt / signature
   uploadSignature: (studentId, file, instituteId) => {
     const formData = new FormData();
     formData.append('studentId', studentId);
@@ -22,38 +23,20 @@ export const handoverApi = {
     return api.post('/handover/upload-signature', formData, inInstitute(instituteId)).then(unwrap);
   },
 
-  uploadPhoto: (studentId, file, instituteId) => {
-    const formData = new FormData();
-    formData.append('studentId', studentId);
-    formData.append('photo', file);
+  // Submit final hand-over
+  submit: (payload, instituteId) =>
+    api.post('/handover', payload, inInstitute(instituteId)).then(unwrap),
 
-    return api.post('/handover/upload-photo', formData, inInstitute(instituteId)).then(unwrap);
-  },
-
-  getHistory: (params = {}, instituteId) => {
-    const filteredParams = Object.fromEntries(
-      Object.entries(params).filter(
-        ([, value]) => value !== '' && value !== null && value !== undefined,
-      ),
-    );
-
-    return api
+  // Get hand-over history for a student
+  listHistory: (studentId, instituteId) =>
+    api
       .get('/handover/history', {
-        params: filteredParams,
         ...inInstitute(instituteId),
+        params: {
+          studentId,
+          page: 1,
+          limit: 20,
+        },
       })
-      .then((response) => {
-        const data = response.data.data;
-        const meta = response.data.meta;
-
-        return {
-          rows: Array.isArray(data) ? data : [],
-          page: meta?.page ?? 1,
-          limit: meta?.limit ?? 20,
-          total: meta?.total ?? 0,
-        };
-      });
-  },
-
-  create: (data, instituteId) => api.post('/handover', data, inInstitute(instituteId)).then(unwrap),
+      .then(unwrapList),
 };

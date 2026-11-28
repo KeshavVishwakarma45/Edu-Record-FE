@@ -3,6 +3,8 @@ import { api, inInstitute, unwrapList, unwrap } from './client';
 export const studentsApi = {
   list: (params) => api.get('/students', { params }).then(unwrapList),
 
+  batches: (params) => api.get('/students/batches', { params }).then(unwrap),
+
   getById: (id) => api.get(`/students/${id}`).then(unwrap),
 
   create: (data, instituteId) => api.post('/students', data, inInstitute(instituteId)).then(unwrap),

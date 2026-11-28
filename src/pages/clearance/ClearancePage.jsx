@@ -16,16 +16,14 @@ import {
   Chip,
 } from '@mui/material';
 
+import Autocomplete from '@mui/material/Autocomplete';
 import DepartmentQueue from './DepartmentQueue';
-import AccountsDues from './AccountsDues';
 import { clearanceApi } from '../../api/clearance';
 import { useAuth } from '@/hooks/useAuth';
 import { PERMISSIONS } from '../../constants/permissions';
-import Autocomplete from '@mui/material/Autocomplete';
 import { studentsApi } from '../../api/students';
 import { useList } from '@/hooks/useList';
 
-// Initial TC Application Form
 const initialForm = {
   studentId: '',
   lastClassAttended: '',
@@ -56,7 +54,6 @@ const declarationOptions = [
   ['booksReturned', 'All issued library books have been returned.'],
 ];
 
-// Status Chip Styling - Based on UI Design PDF
 const getStatusChipSx = (status) => {
   const normalizedStatus = status?.toUpperCase();
 
@@ -66,13 +63,11 @@ const getStatusChipSx = (status) => {
       color: '#176B91',
       borderColor: '#B8E2F4',
     },
-
     NOT_CLEAR: {
       backgroundColor: '#FCE9DF',
       color: '#A64B2A',
       borderColor: '#F1C7B3',
     },
-
     PENDING: {
       backgroundColor: '#FFFFFF',
       color: '#596273',
@@ -93,7 +88,14 @@ const getStatusChipSx = (status) => {
   };
 };
 
+// The institute-specific key resets local page state when the institute changes.
 export default function ClearancePage() {
+  const { selectedInstitute } = useAuth();
+
+  return <ClearancePageContent key={selectedInstitute?.id ?? 'no-institute'} />;
+}
+
+function ClearancePageContent() {
   const [activeTab, setActiveTab] = useState(0);
 
   const [form, setForm] = useState(initialForm);
@@ -117,42 +119,23 @@ export default function ClearancePage() {
 
   const [loading, setLoading] = useState(false);
   const [queueLoading, setQueueLoading] = useState(false);
-  const [duesLoading, setDuesLoading] = useState(false);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
 
   const [applications, setApplications] = useState([]);
   const [queueItems, setQueueItems] = useState([]);
-  const [duesItems, setDuesItems] = useState([]);
-
   const [message, setMessage] = useState(null);
 
-  const { can, isSuperAdmin, selectedInstitute } = useAuth();
-  const [previousInstituteId, setPreviousInstituteId] = useState(selectedInstitute?.id);
-
-  if (previousInstituteId !== selectedInstitute?.id) {
-    setPreviousInstituteId(selectedInstitute?.id);
-    setSelectedStudent(null);
-    setStudentSearch('');
-    setForm((prev) => ({ ...prev, studentId: '' }));
-  }
+  const { can, isSuperAdmin } = useAuth();
 
   const canApplyTC = can(PERMISSIONS.TC_APPLY);
   const canViewClearance = can(PERMISSIONS.CLEARANCE_VIEW);
   const canActClearance = can(PERMISSIONS.CLEARANCE_ACT);
 
-  const [previousCanActClearance, setPreviousCanActClearance] = useState(canActClearance);
+  // Keep the selected tab valid without synchronously updating state in an effect.
+  const visibleActiveTab = !canViewClearance && activeTab === 1 ? 0 : activeTab;
 
-  if (previousCanActClearance !== canActClearance) {
-    setPreviousCanActClearance(canActClearance);
-
-    if (!canActClearance && activeTab === 2) {
-      setActiveTab(0);
-    }
-  }
-
-  // Fetch TC Applications
   const fetchApplications = useCallback(async () => {
-    if (!canActClearance) return;
+    if (!canViewClearance) return;
 
     try {
       setApplicationsLoading(true);
@@ -168,16 +151,13 @@ export default function ClearancePage() {
     } finally {
       setApplicationsLoading(false);
     }
-  }, [canActClearance]);
-
-  // Fetch Department Queue
+  }, [canViewClearance]);
   const fetchDepartmentQueue = useCallback(async () => {
     if (!canViewClearance) return;
 
     try {
       setQueueLoading(true);
 
-      // Super Admin: Fetch all applications for read-only view
       if (isSuperAdmin) {
         const response = await clearanceApi.listApplications();
 
@@ -190,7 +170,6 @@ export default function ClearancePage() {
               department.itemId ||
               department._id ||
               `${application._id}-${department.departmentId || index}`,
-
             studentId: application.student?._id || application.studentId,
             studentName: application.student?.name || 'Student',
             departmentName: department.departmentName || 'Department',
@@ -204,7 +183,6 @@ export default function ClearancePage() {
         return;
       }
 
-      // Other users: Existing Department Queue API
       const response = await clearanceApi.getQueue();
 
       setQueueItems(Array.isArray(response?.rows) ? response.rows : []);
@@ -217,55 +195,40 @@ export default function ClearancePage() {
       setQueueLoading(false);
     }
   }, [canViewClearance, isSuperAdmin]);
-
-  // Fetch Pending Dues
-  const fetchPendingDues = useCallback(async () => {
-    if (!canActClearance) return;
-
-    try {
-      setDuesLoading(true);
-
-      const response = await clearanceApi.getPendingDues();
-
-      setDuesItems(Array.isArray(response?.rows) ? response.rows : []);
-    } catch (error) {
-      setMessage({
-        type: 'error',
-        text: error?.message || 'Unable to load pending dues.',
-      });
-    } finally {
-      setDuesLoading(false);
-    }
-  }, [canActClearance]);
-
-  // Fetch data according to selected tab
   useEffect(() => {
     let isActive = true;
 
     Promise.resolve().then(() => {
       if (!isActive) return;
 
-      if (activeTab === 0 && canViewClearance) {
+      if (visibleActiveTab === 0 && canViewClearance) {
         fetchApplications();
-      } else if (activeTab === 1 && canViewClearance) {
+      } else if (visibleActiveTab === 1 && canViewClearance) {
         fetchDepartmentQueue();
-      } else if (activeTab === 2 && canViewClearance) {
-        fetchPendingDues();
       }
     });
 
     return () => {
       isActive = false;
     };
-  }, [activeTab, canViewClearance, fetchApplications, fetchDepartmentQueue, fetchPendingDues]);
+  }, [visibleActiveTab, canViewClearance, fetchApplications, fetchDepartmentQueue]);
 
-  // Department Status Update
-  // Department Status Update
-  const handleDepartmentStatusChange = async (item, status, remark) => {
+  const handleDepartmentStatusChange = async (item, status, remark = '') => {
+    const normalizedRemark = remark.trim();
+
+    if (status === 'NOT_CLEAR' && !normalizedRemark) {
+      setMessage({
+        type: 'error',
+        text: 'Remark is required when marking clearance as Not Clear.',
+      });
+      return;
+    }
+
     try {
-      const payload = status === 'NOT_CLEAR' ? { status, remark } : { status, remark: '' };
-
-      await clearanceApi.updateItem(item._id, payload);
+      await clearanceApi.updateItem(item._id, {
+        status,
+        ...(status === 'NOT_CLEAR' ? { remark: normalizedRemark } : { remark: '' }),
+      });
 
       setMessage({
         type: 'success',
@@ -282,48 +245,6 @@ export default function ClearancePage() {
     }
   };
 
-  // Accounts Dues Update
-  const handleUpdateDues = async (item, values) => {
-    if (values.amountDue === '' || values.amountDue === null || values.amountDue === undefined) {
-      setMessage({
-        type: 'error',
-        text: 'Please enter an amount due.',
-      });
-      return;
-    }
-
-    const amountDue = Number(values.amountDue);
-
-    if (!Number.isFinite(amountDue) || amountDue < 0) {
-      setMessage({
-        type: 'error',
-        text: 'Please enter a valid dues amount.',
-      });
-      return;
-    }
-
-    try {
-      await clearanceApi.updateDues(item._id, {
-        amountDue,
-        remark: values.remark,
-      });
-
-      setMessage({
-        type: 'success',
-        text: 'Student dues updated successfully.',
-      });
-
-      await fetchPendingDues();
-      await fetchDepartmentQueue();
-    } catch (error) {
-      setMessage({
-        type: 'error',
-        text: error?.message || 'Unable to update student dues.',
-      });
-    }
-  };
-
-  // Form Input Change
   const handleChange = (event) => {
     const { name, value } = event.target;
 
@@ -333,7 +254,6 @@ export default function ClearancePage() {
     }));
   };
 
-  // Checkbox Change
   const handleCheckboxChange = (section, field) => (event) => {
     setForm((prev) => ({
       ...prev,
@@ -344,7 +264,6 @@ export default function ClearancePage() {
     }));
   };
 
-  // Reset Form
   const handleReset = () => {
     setForm({
       ...initialForm,
@@ -356,10 +275,10 @@ export default function ClearancePage() {
     setStudentSearch('');
   };
 
-  // Submit TC Application
   const handleSubmit = async (event) => {
     event.preventDefault();
     setMessage(null);
+
     if (!selectedStudent?._id) {
       setMessage({
         type: 'error',
@@ -372,14 +291,12 @@ export default function ClearancePage() {
       studentId: form.studentId.trim(),
       lastClassAttended: form.lastClassAttended.trim(),
       leavingReason: form.leavingReason.trim(),
-
       documentsEnclosed: {
         tenthMarksheet: form.documentsEnclosed.tenthMarksheet,
         twelfthMarksheet: form.documentsEnclosed.twelfthMarksheet,
         yearSemesterMarksheets:
           form.documentsEnclosed.yearMarksheets || form.documentsEnclosed.semesterMarksheets,
       },
-
       declarations: {
         feesPaid: form.declarations.feesPaid,
         duesCleared: form.declarations.duesCleared,
@@ -394,13 +311,11 @@ export default function ClearancePage() {
 
       const createdItems = Array.isArray(result?.clearanceItems) ? result.clearanceItems : [];
 
-      const departmentCount = createdItems.length;
-
       setMessage({
         type: 'success',
         text: `TC application submitted successfully. Initial status: ${
           result?.overallStatus || 'PENDING'
-        }. Clearance requests created for ${departmentCount} department(s).`,
+        }. Clearance requests created for ${createdItems.length} department(s).`,
       });
 
       handleReset();
@@ -421,7 +336,6 @@ export default function ClearancePage() {
     }
   };
 
-  // Common Section Styling
   const sectionStyle = {
     p: { xs: 2, md: 3 },
     borderRadius: 2,
@@ -438,7 +352,6 @@ export default function ClearancePage() {
 
   return (
     <Box sx={{ width: '100%' }}>
-      {/* Page Header */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h5" fontWeight={700}>
           Clearance & Transfer Certificate
@@ -449,29 +362,25 @@ export default function ClearancePage() {
         </Typography>
       </Box>
 
-      {/* Tabs */}
       <Paper sx={{ borderRadius: 2, mb: 3 }}>
         <Tabs
-          value={activeTab}
+          value={visibleActiveTab}
           onChange={(_, value) => setActiveTab(value)}
           variant="scrollable"
           scrollButtons="auto"
         >
-          <Tab label="TC Application" />
-          <Tab label="Department Queue" />
-          <Tab label="Accounts Dues" disabled={!canActClearance} />
+          <Tab label="TC Application" disabled={!canApplyTC && !canViewClearance} />
+          <Tab label="Department Queue" disabled={!canViewClearance} />
         </Tabs>
       </Paper>
 
-      {/* Feedback Message */}
       {message && (
         <Alert severity={message.type} sx={{ mb: 3 }} onClose={() => setMessage(null)}>
           {message.text}
         </Alert>
       )}
 
-      {/* TC Application Form */}
-      {activeTab === 0 && canApplyTC && !isSuperAdmin && (
+      {visibleActiveTab === 0 && canApplyTC && !isSuperAdmin && (
         <Box
           component="form"
           onSubmit={handleSubmit}
@@ -481,7 +390,6 @@ export default function ClearancePage() {
             gap: 3,
           }}
         >
-          {/* Student Information */}
           <Paper sx={sectionStyle}>
             <Typography sx={sectionHeading}>Student Information</Typography>
 
@@ -502,12 +410,18 @@ export default function ClearancePage() {
                 loading={studentsLoading}
                 inputValue={
                   selectedStudent
-                    ? `${selectedStudent.name || ''} (${selectedStudent.scholarNo || selectedStudent.enrollmentNo || 'No Scholar No.'})`
+                    ? `${selectedStudent.name || ''} (${
+                        selectedStudent.scholarNo ||
+                        selectedStudent.enrollmentNo ||
+                        'No Scholar No.'
+                      })`
                     : studentSearch
                 }
                 filterOptions={(options) => options}
                 getOptionLabel={(option) =>
-                  `${option.name || ''} (${option.scholarNo || option.enrollmentNo || 'No Scholar No.'})`
+                  `${option.name || ''} (${
+                    option.scholarNo || option.enrollmentNo || 'No Scholar No.'
+                  })`
                 }
                 isOptionEqualToValue={(option, value) => option._id === value._id}
                 onInputChange={(event, value, reason) => {
@@ -581,7 +495,6 @@ export default function ClearancePage() {
             </Box>
           </Paper>
 
-          {/* Documents Enclosed */}
           <Paper sx={sectionStyle}>
             <Typography sx={sectionHeading}>Documents Enclosed</Typography>
 
@@ -614,7 +527,6 @@ export default function ClearancePage() {
             </Box>
           </Paper>
 
-          {/* Student Declarations */}
           <Paper sx={sectionStyle}>
             <Typography sx={sectionHeading}>Student Declarations</Typography>
 
@@ -637,7 +549,6 @@ export default function ClearancePage() {
             </Stack>
           </Paper>
 
-          {/* Form Actions */}
           <Stack
             direction="row"
             spacing={2}
@@ -666,10 +577,13 @@ export default function ClearancePage() {
         </Box>
       )}
 
-      {/* Submitted TC Applications */}
-      {activeTab === 0 && canViewClearance && (
-        <Paper sx={{ ...sectionStyle, mt: canApplyTC && !isSuperAdmin ? 3 : 0 }}>
-          {/* Applications Header */}
+      {visibleActiveTab === 0 && canViewClearance && (
+        <Paper
+          sx={{
+            ...sectionStyle,
+            mt: canApplyTC && !isSuperAdmin ? 3 : 0,
+          }}
+        >
           <Box
             sx={{
               display: 'flex',
@@ -699,7 +613,6 @@ export default function ClearancePage() {
             </Button>
           </Box>
 
-          {/* Loading */}
           {applicationsLoading ? (
             <Box
               sx={{
@@ -721,7 +634,6 @@ export default function ClearancePage() {
               No TC applications found.
             </Typography>
           ) : (
-            /* Applications List */
             <Stack spacing={2}>
               {applications.map((application) => (
                 <Paper
@@ -732,7 +644,6 @@ export default function ClearancePage() {
                     borderRadius: 2,
                   }}
                 >
-                  {/* Student Details */}
                   <Stack
                     direction="row"
                     justifyContent="space-between"
@@ -765,7 +676,6 @@ export default function ClearancePage() {
                     />
                   </Stack>
 
-                  {/* Department Status */}
                   {Array.isArray(application.departmentWiseStatus) &&
                     application.departmentWiseStatus.length > 0 && (
                       <Box sx={{ mt: 2.5 }}>
@@ -815,29 +725,15 @@ export default function ClearancePage() {
         </Paper>
       )}
 
-      {/* Department Queue */}
-      {activeTab === 1 && (
+      {visibleActiveTab === 1 && (
         <DepartmentQueue
           items={queueItems}
           loading={queueLoading}
+          pendingCount={queueItems.filter((item) => item.status === 'PENDING').length}
           onStatusChange={
             !isSuperAdmin && canViewClearance && canActClearance
               ? handleDepartmentStatusChange
               : undefined
-          }
-          onUpdateDues={
-            !isSuperAdmin && canViewClearance && canActClearance ? handleUpdateDues : undefined
-          }
-        />
-      )}
-
-      {/* Accounts Dues */}
-      {activeTab === 2 && canActClearance && (
-        <AccountsDues
-          items={duesItems}
-          loading={duesLoading}
-          onUpdateDues={
-            !isSuperAdmin && canViewClearance && canActClearance ? handleUpdateDues : undefined
           }
         />
       )}

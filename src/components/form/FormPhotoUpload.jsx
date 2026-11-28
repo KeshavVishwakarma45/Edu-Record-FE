@@ -45,7 +45,7 @@ export default function FormPhotoUpload({ name, label = 'Student Photo' }) {
       }}
       render={({ field: { onChange }, fieldState }) => (
         <Box>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
             {label}
           </Typography>
 
@@ -65,63 +65,68 @@ export default function FormPhotoUpload({ name, label = 'Student Photo' }) {
             />
           )}
 
-          <Button component="label" variant="outlined" startIcon={<PhotoCameraOutlinedIcon />}>
-            Choose Photo
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 1,
+            }}
+          >
+            <Button component="label" variant="outlined" startIcon={<PhotoCameraOutlinedIcon />}>
+              Choose Photo
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
 
-                if (!file) return;
+                  if (!file) return;
 
-                const error = validatePhoto(file);
+                  const error = validatePhoto(file);
 
-                if (error !== true) {
-                  onChange(null);
+                  if (error !== true) {
+                    onChange(null);
+                    setPreview('');
 
-                  setPreview('');
+                    setError(name, {
+                      type: 'validate',
+                      message: error,
+                    });
+                  } else {
+                    clearErrors(name);
+                    onChange(file);
+                    setPreview(URL.createObjectURL(file));
+                  }
 
-                  setError(name, {
-                    type: 'validate',
-                    message: error,
-                  });
-                } else {
-                  clearErrors(name);
-
-                  onChange(file);
-
-                  setPreview(URL.createObjectURL(file));
-                }
-
-                event.target.value = '';
-              }}
-            />
-          </Button>
-
-          {preview && (
-            <Button
-              color="error"
-              size="small"
-              onClick={() => {
-                onChange(null);
-                clearErrors(name);
-                setPreview('');
-              }}
-              startIcon={<DeleteOutlinedIcon />}
-              sx={{ ml: 1 }}
-            >
-              Remove Photo
+                  event.target.value = '';
+                }}
+              />
             </Button>
-          )}
+
+            {preview && (
+              <Button
+                color="error"
+                size="small"
+                onClick={() => {
+                  onChange(null);
+                  clearErrors(name);
+                  setPreview('');
+                }}
+                startIcon={<DeleteOutlinedIcon />}
+              >
+                Remove Photo
+              </Button>
+            )}
+          </Box>
 
           <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
             JPG, PNG or WEBP. Maximum size: 2 MB.
           </Typography>
 
           {fieldState.error && (
-            <Typography color="error" variant="caption">
+            <Typography color="error" variant="caption" display="block" sx={{ mt: 0.5 }}>
               {fieldState.error.message}
             </Typography>
           )}

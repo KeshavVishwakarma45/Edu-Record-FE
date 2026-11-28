@@ -2,12 +2,16 @@ import dayjs from 'dayjs';
 import { Controller, useFormContext } from 'react-hook-form';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 
-// A date picker (dd/mm/yyyy) connected to the surrounding form.
-// The form value is a 'YYYY-MM-DD' string (or null): a calendar date with no time,
-// so a date of birth never shifts by a day between India time and UTC.
-//   <FormDateField name="dob" label="Date of birth" rules={{ required: 'Enter the date of birth' }} />
-export default function FormDateField({ name, label, rules, helperText, ...props }) {
+export default function FormDateField({
+  name,
+  label,
+  rules,
+  helperText,
+  slotProps = {},
+  ...props
+}) {
   const { control } = useFormContext();
+
   return (
     <Controller
       name={name}
@@ -22,12 +26,23 @@ export default function FormDateField({ name, label, rules, helperText, ...props
           onChange={(value) => field.onChange(value?.isValid() ? value.format('YYYY-MM-DD') : null)}
           inputRef={field.ref}
           slotProps={{
+            ...slotProps,
             textField: {
+              ...slotProps.textField,
+              fullWidth: true,
               onBlur: field.onBlur,
               required: Boolean(rules?.required),
               error: Boolean(fieldState.error),
               helperText: fieldState.error?.message ?? helperText,
+              sx: {
+                width: '100%',
+                ...slotProps.textField?.sx,
+              },
             },
+          }}
+          sx={{
+            width: '100%',
+            ...props.sx,
           }}
         />
       )}

@@ -1,30 +1,34 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Button,
-  Grid,
-  Typography,
+  Alert,
   Box,
+  Button,
   Chip,
-  TextField,
+  CircularProgress,
+  Divider,
+  Grid,
+  LinearProgress,
+  MenuItem,
+  Paper,
+  Stack,
+  Tab,
+  Tabs,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  MenuItem,
-  Paper,
-  Stack,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
+  TextField,
+  Typography,
 } from '@mui/material';
 
 import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
-import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
+import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 
 import { useFormContext, useWatch } from 'react-hook-form';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect as useReactEffect, useState as useReactState } from 'react';
 
 import PageHeader from '@/components/PageHeader';
 import DataTable from '@/components/DataTable';
@@ -41,7 +45,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useList } from '@/hooks/useList';
 import { useNotify } from '@/hooks/useNotify';
 
-// Document types
+import { PERMISSIONS } from '@/constants/permissions';
+
 const DOCUMENT_TYPES = [
   { value: 'Marksheet', label: 'Marksheet' },
   { value: 'Provisional', label: 'Provisional' },
@@ -50,26 +55,88 @@ const DOCUMENT_TYPES = [
 ];
 
 const MISSING_REASONS = [
-  { value: 'RESULT_WITHHELD', label: 'Result Withheld' },
-  { value: 'UNIVERSITY_FEES_DUE', label: 'University Fees Due' },
-  { value: 'ENROLLMENT_PROBLEM', label: 'Enrollment Problem' },
+  { value: 'RESULT_WITHHELD', label: 'Result withheld' },
+  { value: 'UNIVERSITY_FEES_DUE', label: 'University fees due' },
+  { value: 'ENROLLMENT_PROBLEM', label: 'Enrollment problem' },
   { value: 'ABSENT', label: 'Absent' },
-  { value: 'NAME_DETAIL_MISMATCH', label: 'Name / Detail Mismatch' },
-  { value: 'NOT_PRINTED', label: 'Not Printed' },
+  { value: 'NAME_DETAIL_MISMATCH', label: 'Name / detail mismatch' },
+  { value: 'NOT_PRINTED', label: 'Not printed' },
   { value: 'OTHER', label: 'Other' },
 ];
 
 const getRows = (result) => {
   if (Array.isArray(result)) return result;
   if (Array.isArray(result?.rows)) return result.rows;
-  if (Array.isArray(result?.data)) return result.data;
-  if (Array.isArray(result?.data?.rows)) return result.data.rows;
   return [];
 };
 
-const getMissingId = (row) => row.missingDetails?._id || row.missingId || row._id;
+const getId = (value) => {
+  if (!value) return '';
+  return typeof value === 'object' ? value._id || value.id || '' : value;
+};
 
-// Exam months: backend expects numeric month values
+const formatDate = (value) => {
+  if (!value) return '—';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+};
+
+const formatReason = (reason, otherReason) => {
+  if (reason === 'OTHER') return otherReason || 'Other';
+
+  return MISSING_REASONS.find((item) => item.value === reason)?.label || reason || '—';
+};
+
+const getInstituteId = (batch) => getId(batch?.instituteId);
+
+const getStudent = (record) => record?.studentId || {};
+
+const mapStudents = (records) =>
+  records.map((record) => {
+    const student = getStudent(record);
+
+    return {
+      ...record,
+      studentName: student.name || '—',
+      scholarNo: student.scholarNo || '—',
+      rollNo: student.rollNo || '—',
+      enrollmentNo: student.enrollmentNo || '—',
+      documentSerialNo: record.documentSerialNo || '',
+      almirah: record.storageLocation?.almirah || '',
+      fileNo: record.storageLocation?.fileNo || '',
+    };
+  });
+
+const getStatusColor = (status) => {
+  if (status === 'In custody') return 'success';
+  if (status === 'Not received') return 'warning';
+  if (status === 'Expected') return 'default';
+  return 'default';
+};
+
+const currentYear = new Date().getFullYear();
+
+const INITIAL_VALUES = {
+  instituteId: '',
+  universityId: '',
+  courseId: '',
+  examTerm: '',
+  examMonth: '',
+  examYear: String(currentYear),
+  documentType: '',
+  receivedDate: null,
+  referenceNumber: '',
+};
+
 const EXAM_MONTHS = [
   'January',
   'February',
@@ -83,12 +150,10 @@ const EXAM_MONTHS = [
   'October',
   'November',
   'December',
-].map((month, index) => ({
+].map((label, index) => ({
   value: index + 1,
-  label: month,
+  label,
 }));
-
-const currentYear = new Date().getFullYear();
 
 const EXAM_YEARS = Array.from({ length: 10 }, (_, index) => {
   const year = currentYear - 4 + index;
@@ -99,157 +164,50 @@ const EXAM_YEARS = Array.from({ length: 10 }, (_, index) => {
   };
 });
 
-// Batch table columns
-const columns = [
-  {
-    field: 'universityName',
-    header: 'University',
-    sortable: true,
-    render: (row) => row.universityName || row.university?.name || '—',
-  },
-  {
-    field: 'courseName',
-    header: 'Course',
-    sortable: true,
-    render: (row) => row.courseName || row.course?.name || '—',
-  },
-  {
-    field: 'examTerm',
-    header: 'Exam Term',
-    render: (row) => row.examTerm || '—',
-  },
-  {
-    field: 'examSession',
-    header: 'Exam Session',
-    render: (row) => {
-      if (typeof row.examSession === 'string') {
-        return row.examSession;
-      }
-
-      if (row.examSession?.month && row.examSession?.year) {
-        return `${row.examSession.month} / ${row.examSession.year}`;
-      }
-
-      return '—';
-    },
-  },
-  {
-    field: 'documentType',
-    header: 'Document Type',
-    render: (row) => row.documentType || '—',
-  },
-  {
-    field: 'receivedDate',
-    header: 'Received Date',
-    render: (row) => row.receivedDate || '—',
-  },
-  {
-    field: 'counts',
-    header: 'Expected / Received / Missing',
-    render: (row) => {
-      const counts = row.counts || {};
-
-      return `${counts.expected ?? 0} / ${counts.received ?? 0} / ${counts.missing ?? 0}`;
-    },
-  },
-];
-
-const INITIAL_VALUES = {
-  instituteId: '',
-  universityId: '',
-  courseId: '',
-  examTerm: '',
-  examMonth: '',
-  examYear: String(currentYear),
-  documentType: '',
-  receivedDate: null,
-  receivedBy: '',
-  referenceNumber: '',
-};
-
-// Convert API student records into a consistent UI structure
-const mapStudentRecords = (records) => {
-  if (!Array.isArray(records)) {
-    return [];
-  }
-
-  return records.map((record) => {
-    const student = record.studentId || {};
-
-    return {
-      ...record,
-      studentName: student.name || '—',
-      scholarNo: student.scholarNo || '—',
-      rollNo: student.rollNo || '—',
-      enrollmentNo: student.enrollmentNo || '—',
-      documentSerialNo: record.documentSerialNo || '',
-      almirahNo: record.storageLocation?.almirah || '',
-      fileNo: record.storageLocation?.fileNo || '',
-    };
-  });
-};
-
-// Course dropdown
 function CourseField() {
   const { control, setValue } = useFormContext();
+  const instituteId = useWatch({ control, name: 'instituteId' });
 
-  const instituteId = useWatch({
-    control,
-    name: 'instituteId',
-  });
+  const [options, setOptions] = useReactState([]);
+  const [loading, setLoading] = useReactState(false);
+  const [error, setError] = useReactState('');
 
-  const [courseOptions, setCourseOptions] = useState([]);
-  const [courseLoading, setCourseLoading] = useState(false);
-  const [courseError, setCourseError] = useState('');
-
-  useEffect(() => {
+  useReactEffect(() => {
     let active = true;
 
-    // Clear previous course when institute changes
     setValue('courseId', '');
 
-    const loadCourses = async () => {
+    const load = async () => {
       if (!instituteId) {
-        setCourseOptions([]);
-        setCourseLoading(false);
-        setCourseError('');
+        setOptions([]);
         return;
       }
 
-      setCourseLoading(true);
-      setCourseError('');
+      setLoading(true);
+      setError('');
 
       try {
-        const result = await coursesApi.list(
-          {
-            page: 1,
-            limit: 100,
-            sort: 'name',
-          },
-          instituteId,
-        );
+        const result = await coursesApi.list({ page: 1, limit: 100, sort: 'name' }, instituteId);
 
         if (active) {
-          const options = (result.rows || []).map((course) => ({
-            value: course._id,
-            label: `${course.name} (${course.shortCode})`,
-          }));
-
-          setCourseOptions(options);
+          setOptions(
+            getRows(result).map((course) => ({
+              value: course._id,
+              label: `${course.name} (${course.shortCode || ''})`,
+            })),
+          );
         }
-      } catch (error) {
+      } catch (err) {
         if (active) {
-          setCourseOptions([]);
-          setCourseError(error?.message || 'Unable to load courses');
+          setOptions([]);
+          setError(err?.message || 'Unable to load courses');
         }
       } finally {
-        if (active) {
-          setCourseLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
-    loadCourses();
+    load();
 
     return () => {
       active = false;
@@ -260,188 +218,172 @@ function CourseField() {
     <FormSelect
       name="courseId"
       label="Course"
-      options={courseOptions}
-      disabled={!instituteId || courseLoading}
-      helperText={
-        courseError ||
-        (courseLoading
-          ? 'Loading courses...'
-          : !instituteId
-            ? 'Select an institute first'
-            : courseOptions.length === 0
-              ? 'No courses found'
-              : '')
-      }
-      rules={{
-        required: 'Select a course',
-      }}
+      options={options}
+      disabled={!instituteId || loading}
+      helperText={error || (loading ? 'Loading courses...' : '')}
+      rules={{ required: 'Select a course' }}
     />
   );
 }
 
+function StatCard({ label, value, color = 'text.primary' }) {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+        {label}
+      </Typography>
+      <Typography variant="h4" fontWeight={800} color={color} sx={{ mt: 0.25 }}>
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
+function downloadCsv(rows) {
+  if (!rows.length) return;
+
+  const headers = [
+    'Roll No.',
+    'Student',
+    'Scholar No.',
+    'Document Type',
+    'Reason',
+    'Other Reason',
+    'Follow-up Date',
+  ];
+
+  const escapeCsv = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+  const data = rows.map((row) => {
+    const student = getStudent(row);
+    const details = row.missingDetails || {};
+
+    return [
+      student.rollNo,
+      student.name,
+      student.scholarNo,
+      row.documentType,
+      details.reason,
+      details.otherReason,
+      details.followUpDate ? String(details.followUpDate).slice(0, 10) : '',
+    ]
+      .map(escapeCsv)
+      .join(',');
+  });
+
+  const csv = [headers.map(escapeCsv).join(','), ...data].join('\r\n');
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = 'inward-missing-documents.csv';
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
 export default function InwardBatchesPage() {
-  const { selectedInstitute, institutes } = useAuth();
+  const { selectedInstitute, realInstitutes, allInstitutes, can } = useAuth();
+
   const notify = useNotify();
 
-  // Institute options
-  const instituteOptions = (institutes || []).map((institute) => ({
-    value: institute.id,
-    label: institute.name,
-  }));
+  const canRead = can(PERMISSIONS.INWARD_READ);
+  const canManage = can(PERMISSIONS.INWARD_MANAGE);
 
-  // Batch listing
   const list = useList(inwardApi.list, {
     sort: '-createdAt',
   });
 
   const [batchCounts, setBatchCounts] = useState({});
-
-  // University dropdown
+  const [courseNames, setCourseNames] = useState({});
   const [universityOptions, setUniversityOptions] = useState([]);
   const [universityLoading, setUniversityLoading] = useState(false);
-  const [universityError, setUniversityError] = useState('');
 
-  // Create batch dialog
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
-  // Selected batch and students
   const [selectedBatch, setSelectedBatch] = useState(null);
-  const [expectedStudents, setExpectedStudents] = useState([]);
+  const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState('');
-  const [studentSearch, setStudentSearch] = useState('');
 
-  // Receive / edit receipt dialog
-  const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [isEditingReceipt, setIsEditingReceipt] = useState(false);
-
-  const [documentSerialNo, setDocumentSerialNo] = useState('');
-  const [almirahNo, setAlmirahNo] = useState('');
-  const [fileNo, setFileNo] = useState('');
-
-  const [receiptSaving, setReceiptSaving] = useState(false);
-  // Missing documents
   const [missingRows, setMissingRows] = useState([]);
   const [missingLoading, setMissingLoading] = useState(false);
-  const [missingDialogOpen, setMissingDialogOpen] = useState(false);
-  const [missingSaving, setMissingSaving] = useState(false);
-  const [editingMissing, setEditingMissing] = useState(null);
 
-  const [missingReason, setMissingReason] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
+  const [studentSearch, setStudentSearch] = useState('');
+
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [editingReceipt, setEditingReceipt] = useState(false);
+  const [receiptSaving, setReceiptSaving] = useState(false);
+
+  const [serialNo, setSerialNo] = useState('');
+  const [almirah, setAlmirah] = useState('');
+  const [fileNo, setFileNo] = useState('');
+
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [editingMissing, setEditingMissing] = useState(null);
+  const [missingSaving, setMissingSaving] = useState(false);
+  const [reason, setReason] = useState('');
   const [otherReason, setOtherReason] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
 
-  // Pending inward documents
   const [pendingRows, setPendingRows] = useState([]);
   const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingError, setPendingError] = useState('');
   const [pendingSearch, setPendingSearch] = useState('');
+  const [pendingLoaded, setPendingLoaded] = useState(false);
 
-  // Covering letter UI
-  const [coveringLetter, setCoveringLetter] = useState(null);
-  const [coveringLetterError, setCoveringLetterError] = useState('');
+  const [receiveOldRow, setReceiveOldRow] = useState(null);
+  const [targetBatchId, setTargetBatchId] = useState('');
+  const [oldSerialNo, setOldSerialNo] = useState('');
+  const [oldAlmirah, setOldAlmirah] = useState('');
+  const [oldFileNo, setOldFileNo] = useState('');
+  const [oldReceiveSaving, setOldReceiveSaving] = useState(false);
 
-  // Load batch counts
-  useEffect(() => {
-    let active = true;
-
-    const loadBatchCounts = async () => {
-      const batches = list.rows || [];
-
-      if (batches.length === 0) {
-        setBatchCounts({});
-        return;
-      }
-
-      const results = await Promise.all(
-        batches.map(async (batch) => {
-          try {
-            const counts = await inwardApi.getCounts(batch._id, batch.instituteId);
-            return [batch._id, counts];
-          } catch {
-            return [batch._id, { expected: 0, received: 0, missing: 0 }];
-          }
-        }),
-      );
-
-      if (active) {
-        setBatchCounts(Object.fromEntries(results));
-      }
-    };
-
-    loadBatchCounts();
-
-    return () => {
-      active = false;
-    };
-  }, [list.rows]);
-
-  const loadMissingDocuments = useCallback(
-    async (batchId, instituteId) => {
-      if (!batchId) {
-        return [];
-      }
-
-      try {
-        const result = await inwardApi.getMissing(batchId, instituteId);
-        return getRows(result);
-      } catch (error) {
-        notify.error(error);
-        return [];
-      }
-    },
-    [notify],
+  const instituteOptions = useMemo(
+    () =>
+      (realInstitutes || []).map((item) => ({
+        value: item.id,
+        label: `${item.shortCode} · ${item.name}`,
+      })),
+    [realInstitutes],
   );
 
-  useEffect(() => {
-    let active = true;
+  const batchInstituteId = getInstituteId(selectedBatch);
 
-    const load = async () => {
-      if (!selectedBatch?._id) {
-        setMissingRows([]);
-        return;
-      }
+  const refreshBatch = useCallback(async () => {
+    if (!selectedBatch?._id) return;
 
-      setMissingLoading(true);
+    const instituteId = batchInstituteId;
 
-      const rows = await loadMissingDocuments(selectedBatch._id, selectedBatch.instituteId);
+    const [studentResult, missingResult] = await Promise.all([
+      inwardApi.getStudents(selectedBatch._id, instituteId),
+      inwardApi.getMissing(selectedBatch._id, instituteId),
+    ]);
 
-      if (active) {
-        setMissingRows(rows);
-        setMissingLoading(false);
-      }
-    };
+    setStudents(mapStudents(getRows(studentResult)));
+    setMissingRows(getRows(missingResult));
+    list.reload();
+  }, [selectedBatch, batchInstituteId, list]);
 
-    load();
-
-    return () => {
-      active = false;
-    };
-  }, [selectedBatch?._id, selectedBatch?.instituteId, loadMissingDocuments]);
-
-  // Load university options
   useEffect(() => {
     let active = true;
 
     const loadUniversities = async () => {
       setUniversityLoading(true);
-      setUniversityError('');
 
       try {
         const result = await organisationApi.universities();
 
-        if (active) {
-          setUniversityOptions(result || []);
-        }
+        if (active) setUniversityOptions(result || []);
       } catch (error) {
-        if (active) {
-          setUniversityError(error?.message || 'Unable to load universities');
-        }
+        if (active) notify.error(error);
       } finally {
-        if (active) {
-          setUniversityLoading(false);
-        }
+        if (active) setUniversityLoading(false);
       }
     };
 
@@ -450,326 +392,146 @@ export default function InwardBatchesPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [notify]);
 
-  // Load students whenever selected batch changes
   useEffect(() => {
     let active = true;
 
-    const loadStudents = async () => {
+    const loadCounts = async () => {
+      if (!list.rows.length) {
+        setBatchCounts({});
+        return;
+      }
+
+      const results = await Promise.all(
+        list.rows.map(async (batch) => {
+          try {
+            const counts = await inwardApi.getCounts(batch._id, getInstituteId(batch));
+
+            return [batch._id, counts];
+          } catch {
+            return [batch._id, null];
+          }
+        }),
+      );
+
+      if (active) setBatchCounts(Object.fromEntries(results));
+    };
+
+    loadCounts();
+
+    return () => {
+      active = false;
+    };
+  }, [list.rows]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCourseNames = async () => {
+      const instituteIds = [...new Set(list.rows.map(getInstituteId).filter(Boolean))];
+
+      const results = await Promise.all(
+        instituteIds.map(async (id) => {
+          try {
+            const result = await coursesApi.list({ page: 1, limit: 100, sort: 'name' }, id);
+
+            return getRows(result);
+          } catch {
+            return [];
+          }
+        }),
+      );
+
+      const map = {};
+
+      results.flat().forEach((course) => {
+        map[course._id] = course.name;
+      });
+
+      if (active) setCourseNames(map);
+    };
+
+    loadCourseNames();
+
+    return () => {
+      active = false;
+    };
+  }, [list.rows]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadDetail = async () => {
       if (!selectedBatch?._id) {
-        setExpectedStudents([]);
-        setStudentsError('');
+        setStudents([]);
+        setMissingRows([]);
         return;
       }
 
       setStudentsLoading(true);
+      setMissingLoading(true);
       setStudentsError('');
 
       try {
-        const result = await inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId);
+        const [studentResult, missingResult] = await Promise.all([
+          inwardApi.getStudents(selectedBatch._id, batchInstituteId),
+          inwardApi.getMissing(selectedBatch._id, batchInstituteId),
+        ]);
 
         if (active) {
-          setExpectedStudents(mapStudentRecords(getRows(result)));
+          setStudents(mapStudents(getRows(studentResult)));
+          setMissingRows(getRows(missingResult));
         }
       } catch (error) {
         if (active) {
-          setExpectedStudents([]);
-          setStudentsError(error?.message || 'Unable to load students');
-
+          setStudentsError(error?.message || 'Unable to load batch students');
           notify.error(error);
         }
       } finally {
         if (active) {
           setStudentsLoading(false);
+          setMissingLoading(false);
         }
       }
     };
 
-    loadStudents();
+    loadDetail();
 
     return () => {
       active = false;
     };
-  }, [selectedBatch?._id, selectedBatch?.instituteId, notify]);
+  }, [selectedBatch?._id, batchInstituteId, notify]);
 
-  // Filter students
-  const filteredStudents = expectedStudents.filter((student) =>
-    [student.studentName, student.scholarNo, student.rollNo, student.enrollmentNo]
-      .join(' ')
-      .toLowerCase()
-      .includes(studentSearch.toLowerCase()),
+  const receivedStudents = useMemo(
+    () => students.filter((row) => row.status === 'In custody'),
+    [students],
   );
 
-  // Student counts
-  const totalExpected = expectedStudents.length;
+  const missingStudents = useMemo(
+    () => students.filter((row) => row.status === 'Not received'),
+    [students],
+  );
 
-  const totalReceived = expectedStudents.filter(
-    (student) => student.status === 'In custody',
-  ).length;
+  const filteredStudents = useMemo(() => {
+    const search = studentSearch.trim().toLowerCase();
 
-  const totalMissing = expectedStudents.filter(
-    (student) => student.status === 'Missing' || student.status === 'Not received',
-  ).length;
+    let rows = students;
 
-  // Create batch
-  const handleCreate = async (values) => {
-    try {
-      const receivedDate = values.receivedDate?.format
-        ? values.receivedDate.format('YYYY-MM-DD')
-        : String(values.receivedDate || '').slice(0, 10);
+    if (activeTab === 'received') rows = receivedStudents;
+    if (activeTab === 'missing') rows = missingStudents;
 
-      const payload = {
-        universityId: values.universityId,
-        courseId: values.courseId,
-        examTerm: values.examTerm.trim(),
-        examSession: {
-          month: Number(values.examMonth),
-          year: Number(values.examYear),
-        },
-        documentType: values.documentType,
-        receivedDate,
-        ...(values.referenceNumber?.trim()
-          ? {
-              referenceNumber: values.referenceNumber.trim(),
-            }
-          : {}),
-      };
+    if (!search) return rows;
 
-      const result = await inwardApi.create(payload, values.instituteId);
+    return rows.filter((row) =>
+      [row.studentName, row.scholarNo, row.rollNo, row.enrollmentNo]
+        .join(' ')
+        .toLowerCase()
+        .includes(search),
+    );
+  }, [students, activeTab, studentSearch, receivedStudents, missingStudents]);
 
-      setDialogOpen(false);
-      setCoveringLetter(null);
-      setCoveringLetterError('');
-
-      notify.success('Inward batch created successfully');
-
-      await list.reload();
-
-      // Open newly created batch if API returned its ID
-      const newBatch = result?._id ? result : result?.data?._id ? result.data : null;
-
-      if (newBatch?._id) {
-        setSelectedBatch(newBatch);
-        setStudentSearch('');
-      }
-    } catch (error) {
-      notify.error(error);
-    }
-  };
-
-  const handleCloseCreateDialog = () => {
-    setDialogOpen(false);
-    setCoveringLetter(null);
-    setCoveringLetterError('');
-  };
-
-  // Open receive dialog
-  const handleOpenReceiveDialog = (student) => {
-    setSelectedStudent(student);
-    setIsEditingReceipt(false);
-
-    setDocumentSerialNo(student.documentSerialNo || '');
-    setAlmirahNo(student.almirahNo || '');
-    setFileNo(student.fileNo || '');
-
-    setReceiveDialogOpen(true);
-  };
-
-  // Open edit receipt dialog
-  const handleOpenEditReceipt = (student) => {
-    setSelectedStudent(student);
-    setIsEditingReceipt(true);
-
-    setDocumentSerialNo(student.documentSerialNo || '');
-    setAlmirahNo(student.almirahNo || '');
-    setFileNo(student.fileNo || '');
-
-    setReceiveDialogOpen(true);
-  };
-
-  // Close receive dialog
-  const handleCloseReceiveDialog = () => {
-    if (receiptSaving) {
-      return;
-    }
-
-    setReceiveDialogOpen(false);
-    setSelectedStudent(null);
-    setIsEditingReceipt(false);
-
-    setDocumentSerialNo('');
-    setAlmirahNo('');
-    setFileNo('');
-  };
-
-  // Receive new document or update existing receipt
-  const handleSaveReceipt = async () => {
-    if (!selectedBatch?._id || !selectedStudent?._id) {
-      return;
-    }
-
-    const payload = {
-      documentSerialNo: documentSerialNo.trim(),
-      storageLocation: {
-        almirah: almirahNo.trim(),
-        fileNo: fileNo.trim(),
-      },
-    };
-
-    setReceiptSaving(true);
-
-    try {
-      if (isEditingReceipt) {
-        await inwardApi.updateReceipt(
-          selectedBatch._id,
-          selectedStudent._id,
-          payload,
-          selectedBatch.instituteId,
-        );
-
-        notify.success('Receipt updated successfully');
-      } else {
-        const studentId = selectedStudent.studentId?._id;
-
-        if (!studentId) {
-          throw new Error('Student ID is missing');
-        }
-
-        await inwardApi.receive(
-          selectedBatch._id,
-          {
-            studentId,
-            ...payload,
-          },
-          selectedBatch.instituteId,
-        );
-
-        notify.success('Document received successfully');
-      }
-
-      setReceiveDialogOpen(false);
-      setSelectedStudent(null);
-      setIsEditingReceipt(false);
-
-      setDocumentSerialNo('');
-      setAlmirahNo('');
-      setFileNo('');
-
-      // Refresh students after successful action
-      const result = await inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId);
-
-      setExpectedStudents(mapStudentRecords(getRows(result)));
-
-      // Refresh batch list and counts
-      await list.reload();
-    } catch (error) {
-      notify.error(error);
-    } finally {
-      setReceiptSaving(false);
-    }
-  };
-
-  const handleOpenMarkMissing = (student) => {
-    setEditingMissing(student);
-    setMissingReason('');
-    setOtherReason('');
-    setFollowUpDate('');
-    setMissingDialogOpen(true);
-  };
-
-  const handleOpenUpdateMissing = (row) => {
-    const details = row.missingDetails || row;
-
-    setEditingMissing(row);
-    setMissingReason(details.reason || '');
-    setOtherReason(details.otherReason || '');
-    setFollowUpDate(details.followUpDate ? String(details.followUpDate).slice(0, 10) : '');
-    setMissingDialogOpen(true);
-  };
-
-  const handleCloseMissingDialog = () => {
-    if (missingSaving) return;
-
-    setMissingDialogOpen(false);
-    setEditingMissing(null);
-    setMissingReason('');
-    setOtherReason('');
-    setFollowUpDate('');
-  };
-
-  const handleSaveMissing = async () => {
-    if (!selectedBatch?._id || !editingMissing) return;
-
-    if (!missingReason || !followUpDate) {
-      notify.error(new Error('Reason and follow-up date are required'));
-      return;
-    }
-
-    if (missingReason === 'OTHER' && !otherReason.trim()) {
-      notify.error(new Error('Please enter the other reason'));
-      return;
-    }
-
-    const payload = {
-      reason: missingReason,
-      followUpDate,
-      ...(missingReason === 'OTHER' ? { otherReason: otherReason.trim() } : {}),
-    };
-
-    setMissingSaving(true);
-
-    try {
-      if (editingMissing.missingDetails || editingMissing.missingId) {
-        const missingId = getMissingId(editingMissing);
-
-        await inwardApi.updateMissing(
-          selectedBatch._id,
-          missingId,
-          payload,
-          selectedBatch.instituteId,
-        );
-
-        notify.success('Missing details updated successfully');
-      } else {
-        const studentId = editingMissing.studentId?._id;
-
-        if (!studentId) {
-          throw new Error('Student ID is missing');
-        }
-
-        await inwardApi.markMissing(
-          selectedBatch._id,
-          {
-            studentId,
-            ...payload,
-          },
-          selectedBatch.instituteId,
-        );
-
-        notify.success('Document marked as missing');
-      }
-
-      setMissingDialogOpen(false);
-      setEditingMissing(null);
-
-      const [studentsResult, missingResult] = await Promise.all([
-        inwardApi.getStudents(selectedBatch._id, selectedBatch.instituteId),
-        inwardApi.getMissing(selectedBatch._id, selectedBatch.instituteId),
-      ]);
-
-      setExpectedStudents(mapStudentRecords(getRows(studentsResult)));
-      setMissingRows(getRows(missingResult));
-
-      await list.reload();
-    } catch (error) {
-      notify.error(error);
-    } finally {
-      setMissingSaving(false);
-    }
-  };
-
-  const loadPendingDocuments = async (search = '') => {
+  const loadPending = async (search = pendingSearch) => {
     setPendingLoading(true);
     setPendingError('');
 
@@ -777,12 +539,13 @@ export default function InwardBatchesPage() {
       const result = await inwardApi.getPending({
         page: 1,
         limit: 100,
+        sort: '-createdAt',
         ...(search.trim() ? { search: search.trim() } : {}),
       });
 
       setPendingRows(getRows(result));
+      setPendingLoaded(true);
     } catch (error) {
-      setPendingRows([]);
       setPendingError(error?.message || 'Unable to load pending documents');
       notify.error(error);
     } finally {
@@ -790,680 +553,922 @@ export default function InwardBatchesPage() {
     }
   };
 
-  // Validate covering letter PDF
-  const validateCoveringLetter = (file) => {
-    if (!file) {
-      return 'Please select a PDF file';
+  const handleCreate = async (values) => {
+    const receivedDate = values.receivedDate?.format
+      ? values.receivedDate.format('YYYY-MM-DD')
+      : String(values.receivedDate || '').slice(0, 10);
+
+    const payload = {
+      universityId: values.universityId,
+      courseId: values.courseId,
+      examTerm: values.examTerm.trim(),
+      examSession: {
+        month: Number(values.examMonth),
+        year: Number(values.examYear),
+      },
+      documentType: values.documentType,
+      receivedDate,
+      ...(values.referenceNumber?.trim() ? { referenceNumber: values.referenceNumber.trim() } : {}),
+    };
+
+    try {
+      const result = await inwardApi.create(payload, values.instituteId);
+
+      setCreateOpen(false);
+      notify.success('Inward batch created successfully');
+      list.reload();
+
+      if (result?._id) {
+        setSelectedBatch(result);
+        setActiveTab('all');
+      }
+    } catch (error) {
+      notify.error(error);
+      throw error;
+    }
+  };
+
+  const openReceive = (student, edit = false) => {
+    setSelectedStudent(student);
+    setEditingReceipt(edit);
+    setSerialNo(student.documentSerialNo || '');
+    setAlmirah(student.almirah || '');
+    setFileNo(student.fileNo || '');
+    setReceiveOpen(true);
+  };
+
+  const saveReceipt = async () => {
+    if (!selectedStudent || !selectedBatch) return;
+
+    setReceiptSaving(true);
+
+    const payload = {
+      documentSerialNo: serialNo.trim(),
+      storageLocation: {
+        almirah: almirah.trim(),
+        fileNo: fileNo.trim(),
+      },
+    };
+
+    try {
+      if (editingReceipt) {
+        await inwardApi.updateReceipt(
+          selectedBatch._id,
+          selectedStudent._id,
+          payload,
+          batchInstituteId,
+        );
+      } else {
+        const studentId = getId(selectedStudent.studentId);
+
+        if (!studentId) {
+          throw new Error('Student ID not found');
+        }
+
+        await inwardApi.receive(selectedBatch._id, { studentId, ...payload }, batchInstituteId);
+      }
+
+      notify.success(editingReceipt ? 'Receipt updated' : 'Document received');
+
+      setReceiveOpen(false);
+      await refreshBatch();
+    } catch (error) {
+      notify.error(error);
+    } finally {
+      setReceiptSaving(false);
+    }
+  };
+
+  const openMissing = (row, edit = false) => {
+    const details = row.missingDetails || {};
+
+    setEditingMissing({ row, edit });
+    setReason(edit ? details.reason || '' : '');
+    setOtherReason(edit ? details.otherReason || '' : '');
+    setFollowUpDate(edit && details.followUpDate ? String(details.followUpDate).slice(0, 10) : '');
+
+    setMissingOpen(true);
+  };
+
+  const saveMissing = async () => {
+    if (!editingMissing || !selectedBatch) return;
+
+    if (!reason || !followUpDate) {
+      notify.error('Reason and follow-up date are required');
+      return;
     }
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-
-    if (!isPdf) {
-      return 'Only PDF files are allowed';
+    if (reason === 'OTHER' && !otherReason.trim()) {
+      notify.error('Please enter the other reason');
+      return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      return 'PDF size must not exceed 5 MB';
+    const row = editingMissing.row;
+
+    const payload = {
+      reason,
+      followUpDate,
+      otherReason: reason === 'OTHER' ? otherReason.trim() : '',
+    };
+
+    setMissingSaving(true);
+
+    try {
+      if (editingMissing.edit) {
+        await inwardApi.updateMissing(selectedBatch._id, row._id, payload, batchInstituteId);
+      } else {
+        const studentId = getId(row.studentId);
+
+        if (!studentId) throw new Error('Student ID not found');
+
+        await inwardApi.markMissing(selectedBatch._id, { studentId, ...payload }, batchInstituteId);
+      }
+
+      notify.success('Missing document details saved');
+      setMissingOpen(false);
+      await refreshBatch();
+    } catch (error) {
+      notify.error(error);
+    } finally {
+      setMissingSaving(false);
+    }
+  };
+
+  const openReceiveOld = (row) => {
+    setReceiveOldRow(row);
+    setTargetBatchId('');
+    setOldSerialNo('');
+    setOldAlmirah('');
+    setOldFileNo('');
+  };
+
+  const saveReceiveOld = async () => {
+    if (!receiveOldRow || !targetBatchId) {
+      notify.error('Select the new inward batch');
+      return;
     }
 
-    return '';
+    const targetBatch = list.rows.find((batch) => batch._id === targetBatchId);
+
+    if (!targetBatch) {
+      notify.error('Selected batch was not found');
+      return;
+    }
+
+    if (targetBatch.documentType !== receiveOldRow.documentType) {
+      notify.error('Document type does not match the selected batch');
+      return;
+    }
+
+    setOldReceiveSaving(true);
+
+    try {
+      await inwardApi.receiveMissing(
+        targetBatch._id,
+        receiveOldRow._id,
+        {
+          documentSerialNo: oldSerialNo.trim(),
+          storageLocation: {
+            almirah: oldAlmirah.trim(),
+            fileNo: oldFileNo.trim(),
+          },
+        },
+        getInstituteId(targetBatch),
+      );
+
+      notify.success('Previously missing document received');
+      setReceiveOldRow(null);
+      await loadPending('');
+      list.reload();
+    } catch (error) {
+      notify.error(error);
+    } finally {
+      setOldReceiveSaving(false);
+    }
+  };
+
+  const columns = [
+    {
+      field: 'university',
+      header: 'University',
+      render: (row) => row.universityId?.name || '—',
+    },
+    {
+      field: 'course',
+      header: 'Course',
+      render: (row) => {
+        const id = getId(row.courseId);
+        return row.courseId?.name || courseNames[id] || '—';
+      },
+    },
+    {
+      field: 'examTerm',
+      header: 'Exam Term',
+      render: (row) => row.examTerm || '—',
+    },
+    {
+      field: 'examSession',
+      header: 'Exam Session',
+      render: (row) =>
+        row.examSession ? `${row.examSession.month} / ${row.examSession.year}` : '—',
+    },
+    {
+      field: 'documentType',
+      header: 'Document Type',
+    },
+    {
+      field: 'receivedDate',
+      header: 'Received Date',
+      render: (row) => formatDate(row.receivedDate),
+    },
+    {
+      field: 'counts',
+      header: 'Expected / Received / Missing',
+      render: (row) => {
+        const counts = batchCounts[row._id];
+
+        if (!counts) return '—';
+
+        return `${(counts.expected || 0) + (counts.received || 0) + (counts.missing || 0)} / ${counts.received || 0} / ${counts.missing || 0}`;
+      },
+    },
+  ];
+
+  if (!canRead) {
+    return <Alert severity="error">You do not have permission to view inward batches.</Alert>;
+  }
+
+  const batchTotal = students.length;
+
+  const receivedCount = receivedStudents.length;
+  const missingCount = missingStudents.length;
+  const progress = batchTotal > 0 ? (receivedCount / batchTotal) * 100 : 0;
+
+  const formDefaults = {
+    ...INITIAL_VALUES,
+    instituteId: allInstitutes ? '' : selectedInstitute?.id || '',
   };
 
   return (
-    <>
-      <PageHeader
-        title="University document inward"
-        subtitle={
-          selectedInstitute
-            ? `Inward batches for ${selectedInstitute.name}`
-            : 'University document inward batches'
-        }
-        backTo="/"
-        actions={
-          <Button
-            variant="contained"
-            startIcon={<AddOutlinedIcon />}
-            onClick={() => setDialogOpen(true)}
-          >
-            Create Batch
-          </Button>
-        }
-      />
-
-      {/* Batch listing */}
-      <DataTable
-        columns={[
-          ...columns,
-          {
-            field: 'actions',
-            header: 'Actions',
-            render: (row) => (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => {
-                  setSelectedBatch(row);
-                  setStudentSearch('');
-                }}
-              >
-                View Students
-              </Button>
-            ),
-          },
-        ]}
-        rows={(list.rows || []).map((row) => ({
-          ...row,
-          counts: batchCounts[row._id] || {
-            expected: 0,
-            received: 0,
-            missing: 0,
-          },
-        }))}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        onRetry={list.reload}
-        params={list.params}
-        onParamsChange={list.setParams}
-        searchPlaceholder="Search university, course or exam term"
-        emptyText="No inward batches found"
-      />
-
-      {/* Selected batch students */}
-      {selectedBatch && (
-        <Box sx={{ mt: 4 }}>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            justifyContent="space-between"
-            alignItems={{ sm: 'center' }}
-            spacing={2}
-            sx={{ mb: 2 }}
-          >
-            <Box>
-              <Typography variant="h6" fontWeight={600}>
-                Expected Students
-              </Typography>
-
-              <Typography variant="body2" color="text.secondary">
-                Batch: {selectedBatch.examTerm || '—'} | {selectedBatch.documentType || '—'}
-              </Typography>
-            </Box>
-
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setSelectedBatch(null);
-                setExpectedStudents([]);
-                setStudentSearch('');
-              }}
-            >
-              Close Students
-            </Button>
-          </Stack>
-
-          {/* Student counts */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 2 }}>
-            <Chip label={`Expected: ${totalExpected}`} color="info" />
-
-            <Chip label={`Received: ${totalReceived}`} color="success" />
-
-            <Chip label={`Missing: ${totalMissing}`} color="error" />
-          </Stack>
-
-          <TextField
-            fullWidth
-            size="small"
-            placeholder="Search name, scholar no., roll no. or enrollment no."
-            value={studentSearch}
-            onChange={(event) => setStudentSearch(event.target.value)}
-            sx={{ mb: 2 }}
+    <Box>
+      {!selectedBatch ? (
+        <>
+          <PageHeader
+            title="University document inward"
+            subtitle={
+              selectedInstitute?.name
+                ? `Inward batches for ${selectedInstitute.name}`
+                : 'Inward batches for all institutes'
+            }
+            backTo="/"
+            actions={
+              canManage && (
+                <Button
+                  variant="contained"
+                  startIcon={<AddOutlinedIcon />}
+                  onClick={() => setCreateOpen(true)}
+                >
+                  Create Batch
+                </Button>
+              )
+            }
           />
 
-          {studentsLoading ? (
-            <Typography sx={{ py: 3 }} textAlign="center">
-              Loading students...
-            </Typography>
-          ) : studentsError ? (
-            <Box sx={{ py: 3 }}>
-              <Typography color="error" sx={{ mb: 1 }}>
-                {studentsError}
-              </Typography>
+          <DataTable
+            columns={columns}
+            rows={list.rows}
+            total={list.total}
+            loading={list.loading}
+            error={list.error}
+            onRetry={list.reload}
+            params={list.params}
+            onParamsChange={list.setParams}
+            searchPlaceholder="Search university, course or exam term"
+            emptyText="No inward batches found"
+            onRowClick={(row) => setSelectedBatch(row)}
+            rowActions={[
+              {
+                label: 'View students',
+                icon: AddOutlinedIcon,
+                onClick: (row) => setSelectedBatch(row),
+              },
+            ]}
+          />
 
-              <Button
-                variant="outlined"
-                onClick={() => {
-                  setSelectedBatch({ ...selectedBatch });
-                }}
-              >
-                Retry
+          <Box sx={{ mt: 3 }}>
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              justifyContent="space-between"
+              alignItems={{ sm: 'center' }}
+              spacing={1}
+              sx={{ mb: 2 }}
+            >
+              <Box>
+                <Typography variant="h6" fontWeight={700}>
+                  Pending inward documents
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Missing documents from earlier batches
+                </Typography>
+              </Box>
+
+              <Button variant="outlined" onClick={() => loadPending('')} disabled={pendingLoading}>
+                {pendingLoaded ? 'Refresh pending list' : 'Load pending list'}
               </Button>
-            </Box>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Student Name</TableCell>
-                    <TableCell>Scholar No.</TableCell>
-                    <TableCell>Roll No.</TableCell>
-                    <TableCell>Enrollment No.</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Document Serial No.</TableCell>
-                    <TableCell>Almirah No.</TableCell>
-                    <TableCell>File No.</TableCell>
-                    <TableCell>Action</TableCell>
-                  </TableRow>
-                </TableHead>
+            </Stack>
 
-                <TableBody>
-                  {filteredStudents.length > 0 ? (
-                    filteredStudents.map((student) => (
-                      <TableRow key={student._id}>
-                        <TableCell>{student.studentName}</TableCell>
+            {pendingLoaded && (
+              <>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Search pending documents"
+                    value={pendingSearch}
+                    onChange={(event) => setPendingSearch(event.target.value)}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={() => loadPending()}
+                    disabled={pendingLoading}
+                  >
+                    Search
+                  </Button>
+                </Stack>
 
-                        <TableCell>{student.scholarNo}</TableCell>
+                {pendingError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {pendingError}
+                  </Alert>
+                )}
 
-                        <TableCell>{student.rollNo}</TableCell>
-
-                        <TableCell>{student.enrollmentNo}</TableCell>
-
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={student.status || '—'}
-                            color={
-                              student.status === 'In custody'
-                                ? 'success'
-                                : student.status === 'Missing' || student.status === 'Not received'
-                                  ? 'error'
-                                  : 'info'
-                            }
-                          />
-                        </TableCell>
-
-                        <TableCell>{student.documentSerialNo || '—'}</TableCell>
-
-                        <TableCell>{student.almirahNo || '—'}</TableCell>
-
-                        <TableCell>{student.fileNo || '—'}</TableCell>
-
-                        <TableCell>
-                          {student.status === 'Expected' ? (
-                            <Stack direction="row" spacing={1}>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                onClick={() => handleOpenReceiveDialog(student)}
-                              >
-                                Receive
-                              </Button>
-
-                              <Button
-                                size="small"
-                                color="error"
-                                variant="outlined"
-                                onClick={() => handleOpenMarkMissing(student)}
-                              >
-                                Mark Missing
-                              </Button>
-                            </Stack>
-                          ) : student.status === 'In custody' ? (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={() => handleOpenEditReceipt(student)}
-                            >
-                              Edit Receipt
-                            </Button>
-                          ) : (
-                            <Chip size="small" label="Pending" />
-                          )}
-                        </TableCell>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Roll No.</TableCell>
+                        <TableCell>Student</TableCell>
+                        <TableCell>Document</TableCell>
+                        <TableCell>Reason</TableCell>
+                        <TableCell>Follow-up</TableCell>
+                        <TableCell>Original Batch</TableCell>
+                        <TableCell>Action</TableCell>
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={9} align="center">
-                        No students found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-              Missing Documents
+                    </TableHead>
+
+                    <TableBody>
+                      {pendingLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center">
+                            <CircularProgress size={22} />
+                          </TableCell>
+                        </TableRow>
+                      ) : pendingRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center">
+                            No pending documents
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        pendingRows.map((row) => (
+                          <TableRow key={row._id}>
+                            <TableCell>{getStudent(row).rollNo || '—'}</TableCell>
+                            <TableCell>{getStudent(row).name || '—'}</TableCell>
+                            <TableCell>{row.documentType}</TableCell>
+                            <TableCell>
+                              {formatReason(
+                                row.missingDetails?.reason,
+                                row.missingDetails?.otherReason,
+                              )}
+                            </TableCell>
+                            <TableCell>{formatDate(row.missingDetails?.followUpDate)}</TableCell>
+                            <TableCell>{row.batchId?.examTerm || '—'}</TableCell>
+                            <TableCell>
+                              {canManage && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => openReceiveOld(row)}
+                                >
+                                  Receive in new batch
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            )}
+          </Box>
+        </>
+      ) : (
+        <>
+          <Button
+            startIcon={<ArrowBackOutlinedIcon />}
+            onClick={() => {
+              setSelectedBatch(null);
+              setActiveTab('all');
+              setStudentSearch('');
+            }}
+            sx={{ mb: 2 }}
+          >
+            Back to inward batches
+          </Button>
+
+          <PageHeader
+            title={`${selectedBatch.courseId?.name || courseNames[getId(selectedBatch.courseId)] || 'Course'} · ${selectedBatch.examTerm} · ${selectedBatch.documentType}`}
+            subtitle={`${selectedBatch.universityId?.name || 'University'} · received ${formatDate(selectedBatch.receivedDate)} · courier ref ${selectedBatch.referenceNumber || '—'}`}
+            actions={<Chip label={selectedBatch.documentType} color="primary" variant="outlined" />}
+          />
+
+          <Paper variant="outlined" sx={{ p: 2.5, mb: 2.5 }}>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <StatCard label="Expected" value={batchTotal} />
+              </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <StatCard label="Received" value={receivedCount} color="primary.main" />
+              </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <StatCard label="Missing" value={missingCount} color="warning.main" />
+              </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <StatCard label="Received progress" value={`${Math.round(progress)}%`} />
+              </Grid>
+            </Grid>
+
+            <LinearProgress
+              variant="determinate"
+              value={progress}
+              sx={{
+                mt: 2,
+                height: 7,
+                borderRadius: 5,
+                backgroundColor: '#ffe0c2',
+              }}
+            />
+          </Paper>
+
+          <Paper variant="outlined" sx={{ p: 2, mb: 2.5 }}>
+            <Typography fontWeight={700} sx={{ mb: 1.5 }}>
+              Find student document
             </Typography>
 
-            {missingLoading ? (
-              <Typography sx={{ py: 2 }}>Loading missing documents...</Typography>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search name, roll no., scholar no. or enrollment no."
+              value={studentSearch}
+              onChange={(event) => setStudentSearch(event.target.value)}
+            />
+          </Paper>
+
+          <Paper variant="outlined">
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 1,
+                p: 1.5,
+              }}
+            >
+              <Tabs
+                value={activeTab}
+                onChange={(_event, value) => setActiveTab(value)}
+                variant="scrollable"
+              >
+                <Tab value="all" label={`All ${students.length}`} />
+                <Tab value="received" label={`Received ${receivedCount}`} />
+                <Tab value="missing" label={`Missing ${missingCount}`} />
+              </Tabs>
+
+              {activeTab === 'missing' && (
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadOutlinedIcon />}
+                  disabled={missingRows.length === 0}
+                  onClick={() => downloadCsv(missingRows)}
+                >
+                  Download missing list
+                </Button>
+              )}
+            </Box>
+
+            <Divider />
+
+            {studentsLoading || missingLoading ? (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <CircularProgress />
+              </Box>
+            ) : studentsError ? (
+              <Alert severity="error" sx={{ m: 2 }}>
+                {studentsError}
+                <Button onClick={refreshBatch}>Retry</Button>
+              </Alert>
             ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
+              <TableContainer sx={{ overflowX: 'auto' }}>
+                <Table sx={{ minWidth: 900 }}>
                   <TableHead>
                     <TableRow>
+                      <TableCell>Roll No.</TableCell>
                       <TableCell>Student</TableCell>
-                      <TableCell>Document Type</TableCell>
+                      <TableCell>Scholar No.</TableCell>
+                      <TableCell>Status</TableCell>
                       <TableCell>Reason</TableCell>
-                      <TableCell>Follow-up Date</TableCell>
+                      <TableCell>Follow-up</TableCell>
+                      <TableCell>Serial No.</TableCell>
+                      <TableCell>Storage</TableCell>
                       <TableCell>Action</TableCell>
                     </TableRow>
                   </TableHead>
 
                   <TableBody>
-                    {missingRows.length > 0 ? (
-                      missingRows.map((row) => {
-                        const details = row.missingDetails || row;
+                    {filteredStudents.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} align="center">
+                          No students found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredStudents.map((row) => {
+                        const missing = row.missingDetails || {};
 
                         return (
-                          <TableRow key={getMissingId(row)}>
-                            <TableCell>{row.studentId?.name || row.studentName || '—'}</TableCell>
-
-                            <TableCell>{row.documentType || '—'}</TableCell>
-
+                          <TableRow key={row._id} hover>
+                            <TableCell>{row.rollNo}</TableCell>
+                            <TableCell>{row.studentName}</TableCell>
+                            <TableCell>{row.scholarNo}</TableCell>
                             <TableCell>
-                              {details.reason === 'OTHER'
-                                ? details.otherReason || 'Other'
-                                : MISSING_REASONS.find((item) => item.value === details.reason)
-                                    ?.label ||
-                                  details.reason ||
-                                  '—'}
+                              <Chip
+                                size="small"
+                                label={row.status}
+                                color={getStatusColor(row.status)}
+                              />
                             </TableCell>
-
                             <TableCell>
-                              {details.followUpDate
-                                ? String(details.followUpDate).slice(0, 10)
+                              {row.status === 'Not received'
+                                ? formatReason(missing.reason, missing.otherReason)
                                 : '—'}
                             </TableCell>
-
                             <TableCell>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => handleOpenUpdateMissing(row)}
-                              >
-                                Update
-                              </Button>
+                              {row.status === 'Not received'
+                                ? formatDate(missing.followUpDate)
+                                : '—'}
+                            </TableCell>
+                            <TableCell>{row.documentSerialNo || '—'}</TableCell>
+                            <TableCell>
+                              {row.almirah || row.fileNo
+                                ? `${row.almirah || '—'} / ${row.fileNo || '—'}`
+                                : '—'}
+                            </TableCell>
+                            <TableCell>
+                              {canManage && row.status === 'Expected' && (
+                                <Stack direction="row" spacing={1}>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    onClick={() => openReceive(row)}
+                                  >
+                                    Receive
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    color="warning"
+                                    variant="outlined"
+                                    onClick={() => openMissing(row)}
+                                  >
+                                    Missing
+                                  </Button>
+                                </Stack>
+                              )}
+
+                              {canManage && row.status === 'In custody' && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => openReceive(row, true)}
+                                >
+                                  Edit receipt
+                                </Button>
+                              )}
+
+                              {canManage && row.status === 'Not received' && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => openMissing(row, true)}
+                                >
+                                  Update reason
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         );
                       })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={5} align="center">
-                          No missing documents found
-                        </TableCell>
-                      </TableRow>
                     )}
                   </TableBody>
                 </Table>
               </TableContainer>
             )}
-          </Box>
-        </Box>
+          </Paper>
+
+          <Paper variant="outlined" sx={{ mt: 2.5 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 1,
+                p: 2,
+              }}
+            >
+              <Box>
+                <Typography fontWeight={700}>Missing documents</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Missing documents stay on the pending list until received.
+                </Typography>
+              </Box>
+
+              <Button
+                variant="outlined"
+                startIcon={<DownloadOutlinedIcon />}
+                disabled={!missingRows.length}
+                onClick={() => downloadCsv(missingRows)}
+              >
+                Download missing list
+              </Button>
+            </Box>
+
+            <Divider />
+
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Roll No.</TableCell>
+                    <TableCell>Student</TableCell>
+                    <TableCell>Reason</TableCell>
+                    <TableCell>Follow-up date</TableCell>
+                    <TableCell>Action</TableCell>
+                  </TableRow>
+                </TableHead>
+
+                <TableBody>
+                  {missingRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        No missing documents in this batch
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    missingRows.map((row) => (
+                      <TableRow key={row._id}>
+                        <TableCell>{getStudent(row).rollNo || '—'}</TableCell>
+                        <TableCell>{getStudent(row).name || '—'}</TableCell>
+                        <TableCell>
+                          {formatReason(
+                            row.missingDetails?.reason,
+                            row.missingDetails?.otherReason,
+                          )}
+                        </TableCell>
+                        <TableCell>{formatDate(row.missingDetails?.followUpDate)}</TableCell>
+                        <TableCell>
+                          {canManage && (
+                            <Button size="small" onClick={() => openMissing(row, true)}>
+                              Update
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </>
       )}
 
-      <Box sx={{ mt: 4 }}>
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          justifyContent="space-between"
-          alignItems={{ sm: 'center' }}
-          spacing={2}
-          sx={{ mb: 2 }}
-        >
-          <Typography variant="h6" fontWeight={600}>
-            Pending Inward Documents
-          </Typography>
-
-          <Button
-            variant="outlined"
-            onClick={() => loadPendingDocuments(pendingSearch)}
-            disabled={pendingLoading}
-          >
-            Refresh
-          </Button>
-        </Stack>
-
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
-          <TextField
-            fullWidth
-            size="small"
-            label="Search pending documents"
-            value={pendingSearch}
-            onChange={(event) => setPendingSearch(event.target.value)}
-          />
-
-          <Button
-            variant="contained"
-            onClick={() => loadPendingDocuments(pendingSearch)}
-            disabled={pendingLoading}
-          >
-            Search
-          </Button>
-        </Stack>
-
-        {pendingError && (
-          <Typography color="error" sx={{ mb: 2 }}>
-            {pendingError}
-          </Typography>
-        )}
-
-        <TableContainer component={Paper} variant="outlined">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Student</TableCell>
-                <TableCell>Scholar No.</TableCell>
-                <TableCell>Document Type</TableCell>
-                <TableCell>Status</TableCell>
-              </TableRow>
-            </TableHead>
-
-            <TableBody>
-              {pendingLoading ? (
-                <TableRow>
-                  <TableCell colSpan={4} align="center">
-                    Loading pending documents...
-                  </TableCell>
-                </TableRow>
-              ) : pendingRows.length > 0 ? (
-                pendingRows.map((row) => (
-                  <TableRow key={row._id}>
-                    <TableCell>{row.studentId?.name || row.studentName || '—'}</TableCell>
-
-                    <TableCell>{row.studentId?.scholarNo || row.scholarNo || '—'}</TableCell>
-
-                    <TableCell>{row.documentType || '—'}</TableCell>
-
-                    <TableCell>
-                      <Chip size="small" color="warning" label={row.status || 'Not received'} />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={4} align="center">
-                    No pending documents found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Box>
-
-      {/* Receive / Edit Receipt Dialog */}
-      <Dialog open={receiveDialogOpen} onClose={handleCloseReceiveDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{isEditingReceipt ? 'Edit Receipt' : 'Receive Document'}</DialogTitle>
-
-        <DialogContent>
-          <Typography variant="body2" sx={{ mt: 1, mb: 1 }}>
-            Student: {selectedStudent?.studentName || ''}
-          </Typography>
-
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Roll No: {selectedStudent?.rollNo || '—'}
-          </Typography>
-
-          <TextField
-            fullWidth
-            label="Document Serial Number"
-            placeholder="Enter document serial number"
-            value={documentSerialNo}
-            onChange={(event) => setDocumentSerialNo(event.target.value)}
-          />
-
-          <TextField
-            fullWidth
-            label="Almirah Number"
-            placeholder="Enter almirah number"
-            value={almirahNo}
-            onChange={(event) => setAlmirahNo(event.target.value)}
-            sx={{ mt: 2 }}
-          />
-
-          <TextField
-            fullWidth
-            label="File Number"
-            placeholder="Enter file number"
-            value={fileNo}
-            onChange={(event) => setFileNo(event.target.value)}
-            sx={{ mt: 2 }}
-          />
-        </DialogContent>
-
-        <DialogActions>
-          <Button onClick={handleCloseReceiveDialog} disabled={receiptSaving}>
-            Cancel
-          </Button>
-
-          <Button
-            variant="contained"
-            onClick={handleSaveReceipt}
-            disabled={receiptSaving || !selectedStudent}
-          >
-            {receiptSaving ? 'Saving...' : isEditingReceipt ? 'Update Receipt' : 'Confirm Received'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={missingDialogOpen} onClose={handleCloseMissingDialog} fullWidth maxWidth="sm">
-        <DialogTitle>
-          {editingMissing?.missingDetails || editingMissing?.missingId
-            ? 'Update Missing Details'
-            : 'Mark Document as Missing'}
-        </DialogTitle>
-
-        <DialogContent>
-          <TextField
-            fullWidth
-            select
-            label="Reason"
-            value={missingReason}
-            onChange={(event) => setMissingReason(event.target.value)}
-            sx={{ mt: 2 }}
-          >
-            {MISSING_REASONS.map((reason) => (
-              <MenuItem key={reason.value} value={reason.value}>
-                {reason.label}
-              </MenuItem>
-            ))}
-          </TextField>
-
-          {missingReason === 'OTHER' && (
-            <TextField
-              fullWidth
-              label="Other Reason"
-              value={otherReason}
-              onChange={(event) => setOtherReason(event.target.value)}
-              sx={{ mt: 2 }}
-            />
-          )}
-
-          <TextField
-            fullWidth
-            type="date"
-            label="Follow-up Date"
-            value={followUpDate}
-            onChange={(event) => setFollowUpDate(event.target.value)}
-            slotProps={{
-              inputLabel: { shrink: true },
-            }}
-            sx={{ mt: 2 }}
-          />
-        </DialogContent>
-
-        <DialogActions>
-          <Button onClick={handleCloseMissingDialog} disabled={missingSaving}>
-            Cancel
-          </Button>
-
-          <Button variant="contained" onClick={handleSaveMissing} disabled={missingSaving}>
-            {missingSaving ? 'Saving...' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Create Batch Dialog */}
       <FormDialog
-        open={dialogOpen}
-        title="Create Inward Batch"
-        defaultValues={INITIAL_VALUES}
-        onClose={handleCloseCreateDialog}
+        open={createOpen}
+        title="Create inward batch"
+        defaultValues={formDefaults}
+        onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
-        submitLabel="Save Batch"
+        submitLabel="Create batch"
+        maxWidth="sm"
       >
-        <Typography variant="subtitle2" fontWeight={600}>
-          Batch Information
-        </Typography>
-
         <FormSelect
           name="instituteId"
           label="Institute"
           options={instituteOptions}
-          rules={{
-            required: 'Select an institute',
-          }}
+          disabled={!allInstitutes}
+          rules={{ required: 'Select an institute' }}
         />
 
         <FormSelect
           name="universityId"
           label="University"
-          options={universityOptions}
+          options={universityOptions.map((item) => ({
+            value: item._id,
+            label: item.name,
+          }))}
           disabled={universityLoading}
-          helperText={universityError || (universityLoading ? 'Loading universities...' : '')}
-          rules={{
-            required: 'Select a university',
-          }}
+          rules={{ required: 'Select a university' }}
         />
 
         <CourseField />
 
         <FormTextField
           name="examTerm"
-          label="Exam Term"
-          placeholder="e.g. First Year / Semester 1"
-          rules={{
-            required: 'Enter exam term',
-          }}
+          label="Exam term"
+          placeholder="e.g. BCA Year I"
+          rules={{ required: 'Enter exam term' }}
         />
 
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, sm: 6 }}>
             <FormSelect
               name="examMonth"
-              label="Exam Month"
+              label="Exam month"
               options={EXAM_MONTHS}
-              rules={{
-                required: 'Select exam month',
-              }}
+              rules={{ required: 'Select exam month' }}
             />
           </Grid>
-
           <Grid size={{ xs: 12, sm: 6 }}>
             <FormSelect
               name="examYear"
-              label="Exam Year"
+              label="Exam year"
               options={EXAM_YEARS}
-              rules={{
-                required: 'Select exam year',
-              }}
+              rules={{ required: 'Select exam year' }}
             />
           </Grid>
         </Grid>
 
         <FormSelect
           name="documentType"
-          label="Document Type"
+          label="Document type"
           options={DOCUMENT_TYPES}
-          rules={{
-            required: 'Select document type',
-          }}
+          rules={{ required: 'Select document type' }}
         />
-
-        <Typography variant="subtitle2" fontWeight={600} sx={{ mt: 1 }}>
-          Receiving Information
-        </Typography>
 
         <FormDateField
           name="receivedDate"
-          label="Received Date"
-          rules={{
-            required: 'Select received date',
-          }}
+          label="Received date"
+          rules={{ required: 'Select received date' }}
         />
 
-        <FormTextField
-          name="referenceNumber"
-          label="Letter / Courier Reference"
-          placeholder="Enter reference number"
-        />
+        <FormTextField name="referenceNumber" label="Courier / letter reference" />
 
-        {/* Covering letter UI - upload API not yet available */}
-        <Box>
-          <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
-            Scanned Covering Letter
-          </Typography>
-
-          <Button component="label" variant="outlined" startIcon={<UploadFileOutlinedIcon />}>
-            Choose PDF
-            <input
-              hidden
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-
-                if (!file) {
-                  return;
-                }
-
-                const error = validateCoveringLetter(file);
-
-                if (error) {
-                  setCoveringLetter(null);
-                  setCoveringLetterError(error);
-                } else {
-                  setCoveringLetter(file);
-                  setCoveringLetterError('');
-                }
-
-                event.target.value = '';
-              }}
-            />
-          </Button>
-
-          {coveringLetterError && (
-            <Typography variant="caption" color="error" display="block" sx={{ mt: 1 }}>
-              {coveringLetterError}
-            </Typography>
-          )}
-
-          {coveringLetter && (
-            <Box
-              sx={{
-                mt: 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-              }}
-            >
-              <Chip
-                label={coveringLetter.name}
-                onDelete={() => setCoveringLetter(null)}
-                variant="outlined"
-              />
-            </Box>
-          )}
-
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-            PDF format only. Backend file upload API is not available yet, so this file is not
-            uploaded.
-          </Typography>
-        </Box>
+        <Alert severity="info">
+          The backend currently has no covering-letter upload endpoint. The batch can be created
+          with a reference number, but a PDF cannot yet be uploaded.
+        </Alert>
       </FormDialog>
-    </>
+
+      <FormDialog
+        open={receiveOpen}
+        title={editingReceipt ? 'Edit received document' : 'Mark document received'}
+        defaultValues={{}}
+        onClose={() => setReceiveOpen(false)}
+        onSubmit={saveReceipt}
+        submitLabel={editingReceipt ? 'Save changes' : 'Mark received'}
+      >
+        <Alert severity="info">
+          {selectedStudent?.studentName} · Roll no. {selectedStudent?.rollNo}
+        </Alert>
+
+        <TextField
+          fullWidth
+          label="Document serial number"
+          value={serialNo}
+          onChange={(event) => setSerialNo(event.target.value)}
+        />
+
+        <TextField
+          fullWidth
+          label="Almirah"
+          value={almirah}
+          onChange={(event) => setAlmirah(event.target.value)}
+        />
+
+        <TextField
+          fullWidth
+          label="File number"
+          value={fileNo}
+          onChange={(event) => setFileNo(event.target.value)}
+        />
+
+        {receiptSaving && <LinearProgress />}
+      </FormDialog>
+
+      <FormDialog
+        open={missingOpen}
+        title={
+          editingMissing?.edit ? 'Update missing document details' : 'Mark document as missing'
+        }
+        defaultValues={{}}
+        onClose={() => setMissingOpen(false)}
+        onSubmit={saveMissing}
+        submitLabel="Save reason"
+      >
+        <TextField
+          fullWidth
+          select
+          label="Reason"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          required
+        >
+          {MISSING_REASONS.map((item) => (
+            <MenuItem key={item.value} value={item.value}>
+              {item.label}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        {reason === 'OTHER' && (
+          <TextField
+            fullWidth
+            label="Other reason"
+            value={otherReason}
+            onChange={(event) => setOtherReason(event.target.value)}
+            required
+          />
+        )}
+
+        <TextField
+          fullWidth
+          type="date"
+          label="Follow-up date"
+          value={followUpDate}
+          onChange={(event) => setFollowUpDate(event.target.value)}
+          slotProps={{ inputLabel: { shrink: true } }}
+          required
+        />
+
+        {missingSaving && <LinearProgress />}
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(receiveOldRow)}
+        title="Receive previously missing document"
+        defaultValues={{}}
+        onClose={() => setReceiveOldRow(null)}
+        onSubmit={saveReceiveOld}
+        submitLabel="Confirm received"
+      >
+        <Alert severity="info">
+          {getStudent(receiveOldRow)?.name || 'Student'} · {receiveOldRow?.documentType}
+        </Alert>
+
+        <TextField
+          fullWidth
+          select
+          label="New inward batch"
+          value={targetBatchId}
+          onChange={(event) => setTargetBatchId(event.target.value)}
+          required
+        >
+          {list.rows
+            .filter((batch) => batch.documentType === receiveOldRow?.documentType)
+            .map((batch) => (
+              <MenuItem key={batch._id} value={batch._id}>
+                {batch.examTerm} · {batch.documentType} · {batch.examSession?.month}/
+                {batch.examSession?.year}
+              </MenuItem>
+            ))}
+        </TextField>
+
+        <TextField
+          fullWidth
+          label="Document serial number"
+          value={oldSerialNo}
+          onChange={(event) => setOldSerialNo(event.target.value)}
+        />
+
+        <TextField
+          fullWidth
+          label="Almirah"
+          value={oldAlmirah}
+          onChange={(event) => setOldAlmirah(event.target.value)}
+        />
+
+        <TextField
+          fullWidth
+          label="File number"
+          value={oldFileNo}
+          onChange={(event) => setOldFileNo(event.target.value)}
+        />
+
+        {oldReceiveSaving && <LinearProgress />}
+      </FormDialog>
+    </Box>
   );
 }

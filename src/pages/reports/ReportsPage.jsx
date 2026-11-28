@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { coursesApi } from '@/api/courses';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 
 import { reportsApi } from '@/api/reports';
@@ -19,6 +20,7 @@ import DataTable from '@/components/DataTable';
 import { useList } from '@/hooks/useList';
 import { useRequest } from '@/hooks/useRequest';
 import { useNotify } from '@/hooks/useNotify';
+import { useAuth } from '@/hooks/useAuth';
 
 // Backend reason codes and their readable labels
 const REASON_OPTIONS = [
@@ -70,7 +72,7 @@ const columns = [
     field: 'scholarNo',
     header: 'Scholar No.',
     sortable: true,
-    render: (row) => row.student?.scholarNo || '—',
+    render: (row) => row.student?.scholarNo || row.studentId?.scholarNo || row.scholarNo || '—',
   },
   {
     field: 'admissionNo',
@@ -118,9 +120,15 @@ const columns = [
 
 export default function ReportsPage() {
   const notify = useNotify();
+  const { selectedInstitute } = useAuth();
 
   const list = useList(reportsApi.notReceived, {
     sort: '-createdAt',
+  });
+
+  const courseList = useList(coursesApi.list, {
+    sort: 'name',
+    limit: 100,
   });
 
   const updateRequest = useRequest(reportsApi.updateFollowUp);
@@ -225,8 +233,11 @@ export default function ReportsPage() {
     <>
       <PageHeader
         title="Not Received Documents"
-        subtitle="View pending documents and manage follow-up details"
-        backTo="/"
+        subtitle={
+          selectedInstitute
+            ? `Reports for ${selectedInstitute.name}`
+            : 'View pending documents and manage follow-up details'
+        }
       />
 
       <Alert severity="info" sx={{ mb: 2 }}>
@@ -234,8 +245,89 @@ export default function ReportsPage() {
         follow-up date.
       </Alert>
 
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+        <TextField
+          select
+          label="Course"
+          value={list.params.courseId || ''}
+          onChange={(event) => list.setParams({ courseId: event.target.value || undefined })}
+          fullWidth
+          size="small"
+        >
+          <MenuItem value="">All Courses</MenuItem>
+
+          {courseList.rows.map((course) => (
+            <MenuItem key={course._id} value={course._id}>
+              {course.name}
+              {course.shortCode ? ` (${course.shortCode})` : ''}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        <TextField
+          select
+          label="Document Type"
+          value={list.params.documentType || ''}
+          onChange={(event) => list.setParams({ documentType: event.target.value || undefined })}
+          fullWidth
+          size="small"
+        >
+          <MenuItem value="">All Documents</MenuItem>
+          <MenuItem value="Marksheet">Marksheet</MenuItem>
+          <MenuItem value="Provisional">Provisional</MenuItem>
+          <MenuItem value="Degree">Degree</MenuItem>
+          <MenuItem value="Migration">Migration</MenuItem>
+        </TextField>
+
+        <TextField
+          type="date"
+          label="Received From"
+          value={list.params.fromDate || ''}
+          onChange={(event) => list.setParams({ fromDate: event.target.value || undefined })}
+          fullWidth
+          size="small"
+          slotProps={{
+            inputLabel: { shrink: true },
+            htmlInput: {
+              max: list.params.toDate || undefined,
+            },
+          }}
+        />
+
+        <TextField
+          type="date"
+          label="Received To"
+          value={list.params.toDate || ''}
+          onChange={(event) => list.setParams({ toDate: event.target.value || undefined })}
+          fullWidth
+          size="small"
+          slotProps={{
+            inputLabel: { shrink: true },
+            htmlInput: {
+              min: list.params.fromDate || undefined,
+            },
+          }}
+        />
+
+        <Button
+          variant="outlined"
+          onClick={() =>
+            list.setParams({
+              courseId: undefined,
+              documentType: undefined,
+              fromDate: undefined,
+              toDate: undefined,
+            })
+          }
+        >
+          Clear
+        </Button>
+      </Stack>
+
       <DataTable
         columns={columns}
+        instituteColumn={true}
+        instituteFilter={true}
         rows={list.rows}
         total={list.total}
         loading={list.loading}
@@ -287,11 +379,7 @@ export default function ReportsPage() {
                   label="Specify Other Reason"
                   value={otherReason}
                   onChange={(event) => setOtherReason(event.target.value)}
-                  slotProps={{
-                    htmlInput: {
-                      maxLength: 250,
-                    },
-                  }}
+                  inputProps={{ maxLength: 250 }}
                   multiline
                   minRows={2}
                   helperText={`${otherReason.length}/250 characters`}

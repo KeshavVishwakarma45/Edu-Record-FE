@@ -9,6 +9,8 @@ export const clearanceApi = {
   // Department in-charge queue
   getQueue: (params) => api.get('/clearance/queue', { params }).then(unwrapList),
 
+  getPendingCount: () => api.get('/clearance/queue/pending-count').then(unwrap),
+
   updateItem: (itemId, data) => api.patch(`/clearance/items/${itemId}`, data).then(unwrap),
 
   // Student-wise clearance

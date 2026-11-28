@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -15,10 +16,13 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import PictureAsPdfOutlinedIcon from '@mui/icons-material/PictureAsPdfOutlined';
 
 import { tcsApi } from '@/api/tcs';
+import { studentsApi } from '@/api/students';
 import { PERMISSIONS } from '@/constants/permissions';
 import PageHeader from '@/components/PageHeader';
 import DataTable from '@/components/DataTable';
@@ -26,20 +30,21 @@ import { useAuth } from '@/hooks/useAuth';
 import { useList } from '@/hooks/useList';
 import { useRequest } from '@/hooks/useRequest';
 import { useNotify } from '@/hooks/useNotify';
+import { formatDate } from '@/utils/format';
 
 const EMPTY_FORM = {
-  studentName: '',
-  admissionNo: '',
-  course: '',
-  academicYear: '',
+  studentId: '',
   reasonForLeaving: '',
   conduct: '',
 };
+
+const EMPTY_STUDENTS = [];
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'draft', label: 'Draft' },
   { value: 'pending_approval', label: 'Pending Approval' },
+  { value: 'submitted', label: 'Submitted' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'issued', label: 'Issued' },
@@ -53,12 +58,14 @@ const normalizeStatus = (status) =>
 
 const statusLabel = (status) => {
   const value = normalizeStatus(status);
+
   return STATUS_OPTIONS.find((item) => item.value === value)?.label || status || 'Unknown';
 };
 
 const statusColor = (status) => {
   switch (normalizeStatus(status)) {
     case 'pending_approval':
+    case 'submitted':
       return 'warning';
     case 'approved':
       return 'success';
@@ -71,21 +78,66 @@ const statusColor = (status) => {
   }
 };
 
-const formatDate = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('en-IN');
+const getStudentName = (tc) =>
+  tc?.studentId?.name || tc?.student?.name || tc?.snapshot?.student?.name || tc?.studentName || '—';
+
+const getScholarNo = (tc) =>
+  tc?.studentId?.scholarNo ||
+  tc?.student?.scholarNo ||
+  tc?.snapshot?.student?.scholarNo ||
+  tc?.scholarNo ||
+  '—';
+
+const getCourseName = (tc) =>
+  tc?.studentId?.courseId?.name ||
+  tc?.course?.name ||
+  tc?.snapshot?.course?.name ||
+  tc?.student?.course?.name ||
+  tc?.course?.courseName ||
+  tc?.courseName ||
+  (typeof tc?.course === 'string' ? tc.course : null) ||
+  '—';
+
+const getAcademicYear = (tc) =>
+  tc?.studentId?.academicYear ||
+  tc?.academicDetails?.academicYear ||
+  tc?.snapshot?.academicDetails?.academicYear ||
+  tc?.snapshot?.student?.academicYear ||
+  tc?.snapshot?.student?.batch ||
+  '—';
+
+const normalizeDetails = (result) => {
+  const tc = result?.tc || result;
+
+  return {
+    ...tc,
+    student: result?.student || tc?.student,
+    course: result?.course || tc?.course,
+    academicDetails: result?.academicDetails || tc?.academicDetails,
+    clearanceSummary: result?.clearanceSummary || tc?.clearanceSummary,
+  };
 };
 
 const columns = [
-  { field: 'studentName', header: 'Student Name' },
-  { field: 'admissionNo', header: 'Admission No.' },
-  { field: 'course', header: 'Course' },
+  {
+    field: 'studentName',
+    header: 'Student Name',
+    render: (row) => getStudentName(row),
+  },
+  {
+    field: 'scholarNo',
+    header: 'Scholar No.',
+    render: (row) => getScholarNo(row),
+  },
+  {
+    field: 'course',
+    header: 'Course',
+    render: (row) => getCourseName(row),
+  },
   {
     field: 'academicYear',
     header: 'Academic Year',
-    render: (row) => row.academicYear || '—',
+    render: (row) => getAcademicYear(row),
   },
   {
     field: 'status',
@@ -95,21 +147,38 @@ const columns = [
     ),
   },
   {
-    field: 'createdAt',
-    header: 'Created At',
-    render: (row) => formatDate(row.createdAt),
+    field: 'submittedAt',
+    header: 'Submitted At',
+    render: (row) => formatDate(row.submittedAt),
   },
 ];
 
 export default function TCsPage() {
   const notify = useNotify();
-  const { can } = useAuth();
+  const { can, selectedInstitute } = useAuth();
 
-  const canCreate = can(PERMISSIONS.TC_DRAFT);
+  const canCreate = can(PERMISSIONS.TC_APPLY);
+  const canEdit = can(PERMISSIONS.TC_DRAFT);
+  const canSubmit = can(PERMISSIONS.TC_APPLY);
   const canApprove = can(PERMISSIONS.TC_APPROVE);
   const canIssue = can(PERMISSIONS.TC_ISSUE);
+  const canRead = can(PERMISSIONS.TC_READ);
 
-  const list = useList(tcsApi.list, { sort: '-createdAt' });
+  const instituteId = selectedInstitute?.id;
+
+  const handoverPhotoInputRef = useRef(null);
+  const receiverSignatureInputRef = useRef(null);
+
+  const list = useList(tcsApi.list, {
+    page: 1,
+    limit: 10,
+    sort: '-createdAt',
+  });
+
+  const studentsList = useList(studentsApi.list, {
+    page: 1,
+    limit: 100,
+  });
 
   const createRequest = useRequest(tcsApi.create);
   const updateRequest = useRequest(tcsApi.update);
@@ -123,19 +192,29 @@ export default function TCsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
 
+  const [eligibilityResult, setEligibilityResult] = useState({
+    key: '',
+    data: null,
+    error: '',
+  });
+
   const [selectedTC, setSelectedTC] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
   const [editReason, setEditReason] = useState('');
   const [editConduct, setEditConduct] = useState('');
 
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectionRemark, setRejectionRemark] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
 
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const [issueOpen, setIssueOpen] = useState(false);
   const [receivedBy, setReceivedBy] = useState('');
-  const [studentPhoto, setStudentPhoto] = useState(null);
-  const [studentSignature, setStudentSignature] = useState(null);
+  const [handoverPhoto, setHandoverPhoto] = useState(null);
+  const [receiverSignature, setReceiverSignature] = useState(null);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [tcHistory, setTcHistory] = useState([]);
@@ -143,38 +222,173 @@ export default function TCsPage() {
 
   const selectedStatus = normalizeStatus(selectedTC?.status);
 
+  const students = studentsList.rows ?? EMPTY_STUDENTS;
+
+  const selectedStudent = useMemo(
+    () => students.find((student) => student._id === form.studentId) || null,
+    [students, form.studentId],
+  );
+
+  // Check student TC eligibility whenever student or institute changes.
+  const eligibilityKey = form.studentId && instituteId ? `${instituteId}:${form.studentId}` : '';
+
+  useEffect(() => {
+    if (!eligibilityKey) return undefined;
+
+    let cancelled = false;
+
+    const checkEligibility = async () => {
+      try {
+        const result = await tcsApi.getEligibility(form.studentId, instituteId);
+
+        if (!cancelled) {
+          setEligibilityResult({
+            key: eligibilityKey,
+            data: result,
+            error: '',
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEligibilityResult({
+            key: eligibilityKey,
+            data: null,
+            error: error?.message || 'Unable to check student TC eligibility.',
+          });
+        }
+      }
+    };
+
+    void checkEligibility();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eligibilityKey, form.studentId, instituteId]);
+
+  const hasCurrentEligibility = Boolean(eligibilityKey) && eligibilityResult.key === eligibilityKey;
+
+  const eligibility = hasCurrentEligibility ? eligibilityResult.data : null;
+
+  const eligibilityError = hasCurrentEligibility ? eligibilityResult.error : '';
+
+  const eligibilityLoading = Boolean(eligibilityKey) && !hasCurrentEligibility;
+
+  // Revoke the previous PDF URL when it changes or the page unmounts.
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
+
   const updateForm = (field, value) => {
-    setForm((previous) => ({ ...previous, [field]: value }));
+    setForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setForm(EMPTY_FORM);
+  };
+
+  const resetIssueForm = () => {
+    setReceivedBy('');
+    setHandoverPhoto(null);
+    setReceiverSignature(null);
+
+    if (handoverPhotoInputRef.current) {
+      handoverPhotoInputRef.current.value = '';
+    }
+
+    if (receiverSignatureInputRef.current) {
+      receiverSignatureInputRef.current.value = '';
+    }
+  };
+
+  const closeIssue = () => {
+    setIssueOpen(false);
+    resetIssueForm();
+  };
+
+  const handleClosePdf = () => {
+    setPdfOpen(false);
+    setPdfUrl('');
   };
 
   const closeDetails = () => {
     setSelectedTC(null);
     setRejectOpen(false);
-    setPdfOpen(false);
-    setIssueOpen(false);
     setHistoryOpen(false);
-    setRejectionRemark('');
+    setRejectionReason('');
+    setTcHistory([]);
+    setEditReason('');
+    setEditConduct('');
+    closeIssue();
+    handleClosePdf();
   };
 
-  const openDetails = (tc) => {
-    setSelectedTC(tc);
-    setEditReason(tc.reasonForLeaving || '');
-    setEditConduct(tc.conduct || '');
+  const openDetails = async (row) => {
+    setSelectedTC(row);
+    setEditReason(row.reasonForLeaving || '');
+    setEditConduct(row.conduct || '');
+    setDetailsLoading(true);
+
+    try {
+      const result = await tcsApi.getById(row._id, instituteId);
+      const details = normalizeDetails(result);
+
+      setSelectedTC(details);
+      setEditReason(details.reasonForLeaving || '');
+      setEditConduct(details.conduct || '');
+    } catch (error) {
+      notify.error(error);
+    } finally {
+      setDetailsLoading(false);
+    }
   };
 
   const handleCreate = async () => {
-    if (!canCreate) return;
+    if (!form.studentId) {
+      notify.error('Please select a student.');
+      return;
+    }
 
-    if (!form.studentName.trim() || !form.admissionNo.trim() || !form.course.trim()) {
-      notify.error('Student name, admission number and course are required');
+    if (!instituteId) {
+      notify.error('Please select an institute.');
+      return;
+    }
+
+    if (eligibilityLoading) {
+      notify.error('Please wait while student eligibility is being checked.');
+      return;
+    }
+
+    if (eligibilityError) {
+      notify.error('Unable to verify student eligibility. Please try again.');
+      return;
+    }
+
+    if (!eligibility?.eligible) {
+      notify.error('Student is not eligible for Transfer Certificate.');
       return;
     }
 
     try {
-      await createRequest.run(form);
-      notify.success('TC draft created');
-      setCreateOpen(false);
-      setForm(EMPTY_FORM);
+      await createRequest.run(
+        {
+          studentId: form.studentId,
+          reasonForLeaving: form.reasonForLeaving.trim(),
+          conduct: form.conduct.trim(),
+        },
+        instituteId,
+      );
+
+      notify.success('TC draft created successfully.');
+      closeCreate();
       list.reload();
     } catch (error) {
       notify.error(error);
@@ -182,16 +396,26 @@ export default function TCsPage() {
   };
 
   const handleSaveDraft = async () => {
-    if (!selectedTC || !canCreate) return;
+    if (!selectedTC || !canEdit) return;
 
     try {
-      const updated = await updateRequest.run(selectedTC._id, {
-        reasonForLeaving: editReason,
-        conduct: editConduct,
-      });
+      const updated = await updateRequest.run(
+        selectedTC._id,
+        {
+          reasonForLeaving: editReason.trim(),
+          conduct: editConduct.trim(),
+        },
+        instituteId,
+      );
 
-      if (updated) setSelectedTC(updated);
-      notify.success('TC draft updated');
+      if (updated) {
+        setSelectedTC((previous) => ({
+          ...previous,
+          ...(updated.tc || updated),
+        }));
+      }
+
+      notify.success('TC draft updated successfully.');
       list.reload();
     } catch (error) {
       notify.error(error);
@@ -199,10 +423,12 @@ export default function TCsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedTC || !canCreate) return;
+    if (!selectedTC || !canSubmit) return;
+
     try {
-      await submitRequest.run(selectedTC._id);
-      notify.success('TC submitted for approval');
+      await submitRequest.run(selectedTC._id, instituteId);
+
+      notify.success('TC submitted for approval.');
       closeDetails();
       list.reload();
     } catch (error) {
@@ -214,8 +440,16 @@ export default function TCsPage() {
     if (!selectedTC || !canApprove) return;
 
     try {
-      await approveRequest.run(selectedTC._id);
-      notify.success('TC approved successfully');
+      const result = await approveRequest.run(selectedTC._id, instituteId);
+
+      const approvedTC = result?.tc || result;
+
+      notify.success(
+        `TC approved successfully. Reference: ${
+          approvedTC?.refNo || 'Generated'
+        }, Serial: ${approvedTC?.bookSerial || 'Generated'}`,
+      );
+
       closeDetails();
       list.reload();
     } catch (error) {
@@ -226,14 +460,20 @@ export default function TCsPage() {
   const handleReject = async () => {
     if (!selectedTC || !canApprove) return;
 
-    if (!rejectionRemark.trim()) {
-      notify.error('Rejection remark is required');
+    if (rejectionReason.trim().length < 3) {
+      notify.error('Please enter a valid rejection reason.');
+      return;
+    }
+
+    if (rejectionReason.length > 500) {
+      notify.error('Rejection reason cannot exceed 500 characters.');
       return;
     }
 
     try {
-      await rejectRequest.run(selectedTC._id, rejectionRemark);
-      notify.success('TC rejected');
+      await rejectRequest.run(selectedTC._id, rejectionReason.trim(), instituteId);
+
+      notify.success('TC rejected successfully.');
       closeDetails();
       list.reload();
     } catch (error) {
@@ -244,22 +484,39 @@ export default function TCsPage() {
   const handleIssue = async () => {
     if (!selectedTC || !canIssue) return;
 
-    if (!receivedBy.trim() || !studentPhoto || !studentSignature) {
-      notify.error('Received By, student photo and signature are required');
+    if (!receivedBy.trim() || !handoverPhoto || !receiverSignature) {
+      notify.error('Received By, handover photo and receiver signature are required.');
       return;
     }
 
-    try {
-      await issueRequest.run(selectedTC._id, {
-        receivedBy,
-        studentPhoto,
-        studentSignature,
-      });
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
-      notify.success('TC issued successfully');
-      setReceivedBy('');
-      setStudentPhoto(null);
-      setStudentSignature(null);
+    const maxSize = 2 * 1024 * 1024;
+
+    for (const file of [handoverPhoto, receiverSignature]) {
+      if (!allowedTypes.includes(file.type)) {
+        notify.error('Only JPG, PNG and WEBP images are allowed.');
+        return;
+      }
+
+      if (file.size > maxSize) {
+        notify.error('Each image must be 2 MB or smaller.');
+        return;
+      }
+    }
+
+    try {
+      await issueRequest.run(
+        selectedTC._id,
+        {
+          receivedBy: receivedBy.trim(),
+          handoverPhoto,
+          receiverSignature,
+        },
+        instituteId,
+      );
+
+      notify.success('TC issued successfully.');
       closeDetails();
       list.reload();
     } catch (error) {
@@ -272,8 +529,14 @@ export default function TCsPage() {
 
     try {
       setHistoryLoading(true);
-      const result = await tcsApi.history(selectedTC._id);
-      setTcHistory(Array.isArray(result) ? result : result?.rows || result?.history || []);
+
+      const result = await tcsApi.history(selectedTC._id, instituteId);
+
+      const history = Array.isArray(result)
+        ? result
+        : result?.history || result?.rows || result?.activities || [];
+
+      setTcHistory(history);
       setHistoryOpen(true);
     } catch (error) {
       notify.error(error);
@@ -282,13 +545,38 @@ export default function TCsPage() {
     }
   };
 
-  const rowActions = [
-    {
-      label: 'View',
-      icon: VisibilityOutlinedIcon,
-      onClick: openDetails,
-    },
-  ];
+  const handlePdf = async () => {
+    if (!selectedTC || !canRead) return;
+
+    try {
+      setPdfLoading(true);
+
+      const blob = await tcsApi.getPdf(selectedTC._id, instituteId);
+
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error('Invalid or empty PDF received from server.');
+      }
+
+      const url = URL.createObjectURL(blob);
+
+      setPdfUrl(url);
+      setPdfOpen(true);
+    } catch (error) {
+      notify.error(error);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const rowActions = canRead
+    ? [
+        {
+          label: 'View',
+          icon: VisibilityOutlinedIcon,
+          onClick: openDetails,
+        },
+      ]
+    : [];
 
   const busy =
     createRequest.loading ||
@@ -302,11 +590,18 @@ export default function TCsPage() {
     <>
       <PageHeader
         title="Transfer Certificates"
-        subtitle="Manage TC drafts, approvals and student handovers"
-        backTo="/"
+        subtitle={
+          selectedInstitute
+            ? `Transfer Certificates for ${selectedInstitute.name}`
+            : 'Manage TC drafts, approvals and student handovers'
+        }
         actions={
           canCreate && (
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+            <Button
+              variant="contained"
+              startIcon={<AddOutlinedIcon />}
+              onClick={() => setCreateOpen(true)}
+            >
               Create TC
             </Button>
           )
@@ -322,8 +617,13 @@ export default function TCsPage() {
           value={status}
           onChange={(event) => {
             const value = event.target.value;
+
             setStatus(value);
-            list.setParams({ status: value || undefined, page: 1 });
+
+            list.setParams({
+              status: value || undefined,
+              page: 1,
+            });
           }}
         >
           {STATUS_OPTIONS.map((option) => (
@@ -344,42 +644,67 @@ export default function TCsPage() {
         params={list.params}
         onParamsChange={list.setParams}
         rowActions={rowActions}
-        searchPlaceholder="Search student, admission no. or TC ID"
-        emptyText="No TC records found"
+        searchPlaceholder="Search student, reference number or TC ID"
+        emptyText="No transfer certificates found"
       />
 
       {/* CREATE TC */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={createOpen} onClose={closeCreate} fullWidth maxWidth="sm">
         <DialogTitle>Create Transfer Certificate</DialogTitle>
+
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Student Name"
-              value={form.studentName}
-              onChange={(event) => updateForm('studentName', event.target.value)}
-              required
-              fullWidth
+            <Autocomplete
+              options={students}
+              loading={studentsList.loading}
+              value={selectedStudent}
+              getOptionLabel={(student) =>
+                `${student.name || ''} (${student.scholarNo || 'No Scholar No.'})`
+              }
+              isOptionEqualToValue={(option, value) => option._id === value._id}
+              onChange={(_, student) => updateForm('studentId', student?._id || '')}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Select Student"
+                  required
+                  placeholder="Search student name or scholar number"
+                />
+              )}
             />
-            <TextField
-              label="Admission Number"
-              value={form.admissionNo}
-              onChange={(event) => updateForm('admissionNo', event.target.value)}
-              required
-              fullWidth
-            />
-            <TextField
-              label="Course"
-              value={form.course}
-              onChange={(event) => updateForm('course', event.target.value)}
-              required
-              fullWidth
-            />
-            <TextField
-              label="Academic Year"
-              value={form.academicYear}
-              onChange={(event) => updateForm('academicYear', event.target.value)}
-              fullWidth
-            />
+
+            {selectedStudent && (
+              <Alert severity="info">
+                Selected: {selectedStudent.name} · Scholar No.: {selectedStudent.scholarNo || '—'}
+              </Alert>
+            )}
+
+            {eligibilityLoading && (
+              <Alert severity="info">Checking student clearance eligibility...</Alert>
+            )}
+
+            {eligibilityError && <Alert severity="error">{eligibilityError}</Alert>}
+
+            {eligibility && !eligibilityLoading && (
+              <Alert severity={eligibility.eligible ? 'success' : 'warning'}>
+                {eligibility.eligible
+                  ? 'Student is eligible for a Transfer Certificate.'
+                  : eligibility.eligibilityStatus === 'no_clearance_application'
+                    ? 'No clearance application found for this student. TC cannot be created yet.'
+                    : 'Student has pending mandatory clearances.'}
+
+                {!eligibility.eligible && eligibility.pending?.length > 0 && (
+                  <Box component="ul" sx={{ mt: 1, mb: 0, pl: 2 }}>
+                    {eligibility.pending.map((item, index) => (
+                      <li key={item.departmentId || index}>
+                        {item.departmentName || 'Department'} — {item.status || 'Pending'}
+                      </li>
+                    ))}
+                  </Box>
+                )}
+              </Alert>
+            )}
+
             <TextField
               label="Reason for Leaving"
               value={form.reasonForLeaving}
@@ -388,6 +713,7 @@ export default function TCsPage() {
               minRows={2}
               fullWidth
             />
+
             <TextField
               label="Conduct"
               value={form.conduct}
@@ -396,14 +722,22 @@ export default function TCsPage() {
             />
           </Stack>
         </DialogContent>
+
         <DialogActions>
-          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button onClick={closeCreate}>Cancel</Button>
+
           <Button
             variant="contained"
             onClick={handleCreate}
-            disabled={!canCreate || createRequest.loading}
+            disabled={
+              !form.studentId ||
+              !eligibility?.eligible ||
+              eligibilityLoading ||
+              Boolean(eligibilityError) ||
+              createRequest.loading
+            }
           >
-            Save Draft
+            {createRequest.loading ? 'Creating...' : 'Create Draft'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -411,123 +745,158 @@ export default function TCsPage() {
       {/* TC DETAILS */}
       <Dialog open={Boolean(selectedTC)} onClose={closeDetails} fullWidth maxWidth="md">
         <DialogTitle>Transfer Certificate Details</DialogTitle>
+
         <DialogContent dividers>
-          {selectedTC && (
-            <Stack spacing={2}>
-              <Typography variant="h6">Student Information</Typography>
-              <Typography>Student Name: {selectedTC.studentName}</Typography>
-              <Typography>Admission Number: {selectedTC.admissionNo}</Typography>
-              <Typography>Course: {selectedTC.course}</Typography>
-              <Typography>Academic Year: {selectedTC.academicYear || '—'}</Typography>
+          {detailsLoading ? (
+            <Typography color="text.secondary">Loading TC details...</Typography>
+          ) : (
+            selectedTC && (
+              <Stack spacing={2}>
+                <Typography variant="h6">Student Information</Typography>
 
-              <Divider />
+                <Typography>Student Name: {getStudentName(selectedTC)}</Typography>
 
-              <Typography variant="h6">TC Information</Typography>
+                <Typography>Scholar Number: {getScholarNo(selectedTC)}</Typography>
 
-              {selectedStatus === 'draft' ? (
-                <>
-                  <TextField
-                    label="Reason for Leaving"
-                    value={editReason}
-                    onChange={(event) => setEditReason(event.target.value)}
-                    fullWidth
-                    multiline
-                    minRows={2}
+                <Typography>Course: {getCourseName(selectedTC)}</Typography>
+
+                <Typography>Academic Year: {getAcademicYear(selectedTC)}</Typography>
+
+                <Divider />
+
+                <Typography variant="h6">TC Information</Typography>
+
+                {selectedStatus === 'draft' && canEdit ? (
+                  <>
+                    <TextField
+                      label="Reason for Leaving"
+                      value={editReason}
+                      onChange={(event) => setEditReason(event.target.value)}
+                      fullWidth
+                      multiline
+                      minRows={2}
+                    />
+
+                    <TextField
+                      label="Conduct"
+                      value={editConduct}
+                      onChange={(event) => setEditConduct(event.target.value)}
+                      fullWidth
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Typography>
+                      Reason for Leaving: {selectedTC.reasonForLeaving || '—'}
+                    </Typography>
+
+                    <Typography>Conduct: {selectedTC.conduct || '—'}</Typography>
+                  </>
+                )}
+
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography>Status:</Typography>
+
+                  <Chip
+                    size="small"
+                    label={statusLabel(selectedTC.status)}
+                    color={statusColor(selectedTC.status)}
                   />
-                  <TextField
-                    label="Conduct"
-                    value={editConduct}
-                    onChange={(event) => setEditConduct(event.target.value)}
-                    fullWidth
-                  />
-                </>
-              ) : (
-                <>
-                  <Typography>Reason for Leaving: {selectedTC.reasonForLeaving || '—'}</Typography>
-                  <Typography>Conduct: {selectedTC.conduct || '—'}</Typography>
-                </>
-              )}
+                </Stack>
 
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography>Status:</Typography>
-                <Chip
-                  size="small"
-                  label={statusLabel(selectedTC.status)}
-                  color={statusColor(selectedTC.status)}
-                />
+                {selectedTC.refNo && <Typography>Reference No.: {selectedTC.refNo}</Typography>}
+
+                {selectedTC.bookSerial && (
+                  <Typography>Book Serial: {selectedTC.bookSerial}</Typography>
+                )}
+
+                {selectedTC.rejectionReason && (
+                  <Alert severity="error">Rejection Reason: {selectedTC.rejectionReason}</Alert>
+                )}
+
+                {selectedTC.receivedBy && (
+                  <Typography>Received By: {selectedTC.receivedBy}</Typography>
+                )}
+
+                {selectedTC.issuedAt && (
+                  <Typography>Issued At: {formatDate(selectedTC.issuedAt)}</Typography>
+                )}
+
+                {selectedTC.clearanceSummary && (
+                  <>
+                    <Divider />
+
+                    <Typography variant="h6">Clearance Summary</Typography>
+
+                    <Alert severity="info">
+                      {typeof selectedTC.clearanceSummary === 'string'
+                        ? selectedTC.clearanceSummary
+                        : selectedTC.clearanceSummary.message ||
+                          (selectedTC.clearanceSummary.eligible === true
+                            ? 'Clearance requirements completed.'
+                            : selectedTC.clearanceSummary.eligible === false
+                              ? 'Some clearance requirements are pending.'
+                              : 'Clearance information is available.')}
+                    </Alert>
+                  </>
+                )}
               </Stack>
-
-              {selectedTC.refNo && <Typography>Reference No.: {selectedTC.refNo}</Typography>}
-              {selectedTC.bookSerial && (
-                <Typography>Book Serial: {selectedTC.bookSerial}</Typography>
-              )}
-              {selectedTC.rejectionRemark && (
-                <Alert severity="error">Rejection Remark: {selectedTC.rejectionRemark}</Alert>
-              )}
-              {selectedTC.receivedBy && (
-                <Typography>Received By: {selectedTC.receivedBy}</Typography>
-              )}
-              {selectedTC.issuedAt && (
-                <Typography>Issued At: {formatDate(selectedTC.issuedAt)}</Typography>
-              )}
-            </Stack>
+            )
           )}
         </DialogContent>
 
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1, p: 2 }}>
-          <Button onClick={handleHistory} disabled={historyLoading || busy}>
+          <Button onClick={handleHistory} disabled={historyLoading || busy || detailsLoading}>
             {historyLoading ? 'Loading History...' : 'View History'}
           </Button>
 
-          {selectedStatus === 'draft' && (
-            <>
-              <Button onClick={handleSaveDraft} disabled={!canCreate || busy}>
-                Save Changes
-              </Button>
-              <Button variant="contained" onClick={handleSubmit} disabled={!canCreate || busy}>
-                Submit for Approval
-              </Button>
-            </>
-          )}
-
-          {selectedStatus === 'pending_approval' && (
-            <>
-              <Button
-                color="error"
-                variant="outlined"
-                onClick={() => setRejectOpen(true)}
-                disabled={!canApprove || busy}
-              >
-                Reject
-              </Button>
-              <Button
-                color="success"
-                variant="contained"
-                onClick={handleApprove}
-                disabled={!canApprove || busy}
-              >
-                Approve
-              </Button>
-              {!canApprove && (
-                <Typography variant="caption" color="error">
-                  TC_APPROVE permission required
-                </Typography>
-              )}
-            </>
-          )}
-
-          {(selectedStatus === 'approved' || selectedStatus === 'issued') && (
-            <Button variant="contained" onClick={() => setPdfOpen(true)}>
-              Preview TC PDF
+          {selectedStatus === 'draft' && canEdit && (
+            <Button onClick={handleSaveDraft} disabled={busy || detailsLoading}>
+              Save Changes
             </Button>
           )}
 
-          {selectedStatus === 'approved' && (
+          {selectedStatus === 'draft' && canSubmit && (
+            <Button variant="contained" onClick={handleSubmit} disabled={busy || detailsLoading}>
+              Submit for Approval
+            </Button>
+          )}
+
+          {canApprove &&
+            (selectedStatus === 'pending_approval' || selectedStatus === 'submitted') && (
+              <>
+                <Button
+                  color="error"
+                  variant="outlined"
+                  onClick={() => setRejectOpen(true)}
+                  disabled={busy}
+                >
+                  Reject
+                </Button>
+
+                <Button color="success" variant="contained" onClick={handleApprove} disabled={busy}>
+                  Approve
+                </Button>
+              </>
+            )}
+
+          {canRead && (selectedStatus === 'approved' || selectedStatus === 'issued') && (
+            <Button
+              variant="contained"
+              startIcon={<PictureAsPdfOutlinedIcon />}
+              onClick={handlePdf}
+              disabled={pdfLoading}
+            >
+              {pdfLoading ? 'Loading PDF...' : 'View TC PDF'}
+            </Button>
+          )}
+
+          {selectedStatus === 'approved' && canIssue && (
             <Button
               variant="contained"
               color="success"
               onClick={() => setIssueOpen(true)}
-              disabled={!canIssue || busy}
+              disabled={busy}
             >
               Issue TC
             </Button>
@@ -540,92 +909,85 @@ export default function TCsPage() {
       {/* REJECT */}
       <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Reject Transfer Certificate</DialogTitle>
+
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
             Please provide a mandatory reason for rejecting this TC.
           </DialogContentText>
+
           <TextField
             fullWidth
             multiline
             minRows={3}
-            label="Rejection Remark"
-            value={rejectionRemark}
-            onChange={(event) => setRejectionRemark(event.target.value)}
+            label="Rejection Reason"
+            value={rejectionReason}
+            onChange={(event) => setRejectionReason(event.target.value)}
+            slotProps={{
+              htmlInput: { maxLength: 500 },
+            }}
             required
+            helperText={`${rejectionReason.length}/500 characters`}
           />
         </DialogContent>
+
         <DialogActions>
           <Button onClick={() => setRejectOpen(false)}>Cancel</Button>
+
           <Button
             color="error"
             variant="contained"
             onClick={handleReject}
-            disabled={!rejectionRemark.trim() || busy || !canApprove}
+            disabled={
+              rejectionReason.trim().length < 3 ||
+              rejectionReason.length > 500 ||
+              busy ||
+              !canApprove
+            }
           >
-            Confirm Reject
+            {rejectRequest.loading ? 'Rejecting...' : 'Confirm Reject'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* PDF PREVIEW */}
-      <Dialog open={pdfOpen} onClose={() => setPdfOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>Transfer Certificate Preview</DialogTitle>
-        <DialogContent dividers>
-          {selectedTC && (
+      {/* BACKEND PDF */}
+      <Dialog open={pdfOpen} onClose={handleClosePdf} fullWidth maxWidth="lg">
+        <DialogTitle>Transfer Certificate PDF</DialogTitle>
+
+        <DialogContent dividers sx={{ height: '75vh', p: 0 }}>
+          {pdfUrl ? (
             <Box
-              id="tc-print-area"
+              component="iframe"
+              src={pdfUrl}
+              title="Transfer Certificate PDF"
               sx={{
-                p: { xs: 2, sm: 4 },
-                border: '1px solid #999',
-                backgroundColor: 'white',
-                color: '#222',
-                minHeight: 600,
+                width: '100%',
+                height: '100%',
+                border: 0,
               }}
-            >
-              <Typography variant="h5" align="center" fontWeight="bold">
-                {selectedTC.instituteName || 'SSISM'}
-              </Typography>
-              <Typography align="center" fontWeight="bold">
-                TRANSFER CERTIFICATE
-              </Typography>
-              <Divider sx={{ my: 2, borderColor: '#555' }} />
-
-              <Stack spacing={1}>
-                <Typography>Reference No.: {selectedTC.refNo || '—'}</Typography>
-                <Typography>Book Serial: {selectedTC.bookSerial || '—'}</Typography>
-                <Typography>Student Name: {selectedTC.studentName}</Typography>
-                <Typography>Admission No.: {selectedTC.admissionNo}</Typography>
-                <Typography>Course: {selectedTC.course}</Typography>
-                <Typography>Academic Year: {selectedTC.academicYear || '—'}</Typography>
-                <Typography>Reason for Leaving: {selectedTC.reasonForLeaving || '—'}</Typography>
-                <Typography>Conduct: {selectedTC.conduct || '—'}</Typography>
-              </Stack>
-
-              <Divider sx={{ my: 3, borderColor: '#555' }} />
-              <Typography align="center" fontWeight="bold">
-                CHARACTER CERTIFICATE
-              </Typography>
-              <Typography sx={{ mt: 2 }}>
-                This is to certify that the conduct of {selectedTC.studentName} during the period of
-                study was {selectedTC.conduct || 'not specified'}.
-              </Typography>
-              <Box sx={{ mt: 8, display: 'flex', justifyContent: 'flex-end' }}>
-                <Typography>Principal Signature</Typography>
-              </Box>
-            </Box>
+            />
+          ) : (
+            <Typography sx={{ p: 3 }}>PDF preview unavailable.</Typography>
           )}
         </DialogContent>
+
         <DialogActions>
-          <Button onClick={() => setPdfOpen(false)}>Close</Button>
-          <Button variant="contained" onClick={() => window.print()}>
-            Print
-          </Button>
+          <Button onClick={handleClosePdf}>Close</Button>
+
+          {pdfUrl && (
+            <Button
+              variant="contained"
+              onClick={() => window.open(pdfUrl, '_blank', 'noopener,noreferrer')}
+            >
+              Open PDF
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
       {/* ISSUE TC */}
-      <Dialog open={issueOpen} onClose={() => setIssueOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={issueOpen} onClose={closeIssue} maxWidth="sm" fullWidth>
         <DialogTitle>Issue Transfer Certificate</DialogTitle>
+
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
@@ -633,43 +995,60 @@ export default function TCsPage() {
               label="Received By"
               value={receivedBy}
               onChange={(event) => setReceivedBy(event.target.value)}
+              slotProps={{
+                htmlInput: { maxLength: 100 },
+              }}
               required
             />
 
             <Button component="label" variant="outlined">
-              Upload Student Photo
+              Upload Handover Photo
               <input
+                ref={handoverPhotoInputRef}
                 hidden
                 type="file"
-                accept="image/*"
-                onChange={(event) => setStudentPhoto(event.target.files?.[0] || null)}
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setHandoverPhoto(event.target.files?.[0] || null)}
               />
             </Button>
-            <Typography variant="body2">{studentPhoto?.name || 'No photo selected'}</Typography>
+
+            <Typography variant="body2">
+              {handoverPhoto?.name || 'No handover photo selected'}
+            </Typography>
 
             <Button component="label" variant="outlined">
-              Upload Student Signature
+              Upload Receiver Signature
               <input
+                ref={receiverSignatureInputRef}
                 hidden
                 type="file"
-                accept="image/*"
-                onChange={(event) => setStudentSignature(event.target.files?.[0] || null)}
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setReceiverSignature(event.target.files?.[0] || null)}
               />
             </Button>
+
             <Typography variant="body2">
-              {studentSignature?.name || 'No signature selected'}
+              {receiverSignature?.name || 'No receiver signature selected'}
             </Typography>
+
+            <Alert severity="info">
+              Both images must be JPG, PNG or WEBP and must not exceed 2 MB each.
+            </Alert>
           </Stack>
         </DialogContent>
+
         <DialogActions>
-          <Button onClick={() => setIssueOpen(false)}>Cancel</Button>
+          <Button onClick={closeIssue}>Cancel</Button>
+
           <Button
             variant="contained"
             color="success"
             onClick={handleIssue}
-            disabled={!receivedBy.trim() || !studentPhoto || !studentSignature || !canIssue || busy}
+            disabled={
+              !receivedBy.trim() || !handoverPhoto || !receiverSignature || !canIssue || busy
+            }
           >
-            Confirm Issue
+            {issueRequest.loading ? 'Issuing...' : 'Confirm Issue'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -677,6 +1056,7 @@ export default function TCsPage() {
       {/* HISTORY */}
       <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>TC History / Audit Trail</DialogTitle>
+
         <DialogContent dividers>
           {tcHistory.length === 0 ? (
             <Typography color="text.secondary">No history available.</Typography>
@@ -684,22 +1064,47 @@ export default function TCsPage() {
             <Stack spacing={2}>
               {tcHistory.map((item, index) => (
                 <Box key={item._id || `${item.action}-${index}`}>
-                  <Typography fontWeight="bold">
-                    {item.action || item.event || 'Workflow update'}
-                  </Typography>
-                  {item.remark && <Typography variant="body2">Remark: {item.remark}</Typography>}
-                  {item.performedBy && (
-                    <Typography variant="body2">By: {item.performedBy}</Typography>
+                  <Typography fontWeight="bold">{item.action || 'Workflow update'}</Typography>
+
+                  {item.details?.after?.rejectionReason && (
+                    <Typography variant="body2">
+                      Rejection Reason: {item.details.after.rejectionReason}
+                    </Typography>
                   )}
+
+                  {item.details?.after?.refNo && (
+                    <Typography variant="body2">
+                      Reference No.: {item.details.after.refNo}
+                    </Typography>
+                  )}
+
+                  {item.details?.after?.bookSerial && (
+                    <Typography variant="body2">
+                      Book Serial: {item.details.after.bookSerial}
+                    </Typography>
+                  )}
+
+                  {item.details?.after?.receivedBy && (
+                    <Typography variant="body2">
+                      Received By: {item.details.after.receivedBy}
+                    </Typography>
+                  )}
+
+                  {item.performedBy?.name && (
+                    <Typography variant="body2">By: {item.performedBy.name}</Typography>
+                  )}
+
                   <Typography variant="caption" color="text.secondary">
-                    {formatDate(item.at || item.createdAt)}
+                    {formatDate(item.timestamp)}
                   </Typography>
+
                   <Divider sx={{ mt: 1 }} />
                 </Box>
               ))}
             </Stack>
           )}
         </DialogContent>
+
         <DialogActions>
           <Button onClick={() => setHistoryOpen(false)}>Close</Button>
         </DialogActions>

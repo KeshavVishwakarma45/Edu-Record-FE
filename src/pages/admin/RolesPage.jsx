@@ -1,295 +1,779 @@
-import { useEffect, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  CircularProgress,
+  Divider,
+  FormControlLabel,
+  MenuItem,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
+import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
+import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { rolesApi } from '@/api/roles';
 import { PERMISSION_GROUPS, PERMISSION_LIST } from '@/constants/permissions';
 import { OWNER_TYPES } from '@/constants/ownerTypes';
 import PageHeader from '@/components/PageHeader';
-import DataTable from '@/components/DataTable';
-import InstituteBadges from '@/components/InstituteBadges';
-import FormDialog from '@/components/FormDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import FormTextField from '@/components/form/FormTextField';
-import FormSelect from '@/components/form/FormSelect';
-import FormCheckboxGroup from '@/components/form/FormCheckboxGroup';
 import { useAuth } from '@/hooks/useAuth';
 import { useList } from '@/hooks/useList';
 import { useRequest } from '@/hooks/useRequest';
 import { useNotify } from '@/hooks/useNotify';
 
-// Roles of the selected institute, or of its unit when institutes are combined (ADR-016).
-// A role is a name plus permissions; the code checks permissions, never role names.
-// Each institute or unit has its own roles. In the "All institutes" view the Super Admin sees
-// them all and chooses which institute / unit a new role is for.
-// A unit's role can be used in only some of its institutes ("Used in"): staff with that role can
-// open only those institutes.
-
-const columns = [
-  { field: 'name', header: 'Role', sortable: true },
-  { field: 'description', header: 'Description', render: (role) => role.description || '—' },
-  {
-    field: 'permissions',
-    header: 'Permissions',
-    render: (role) => `${role.permissions.length} of ${PERMISSION_LIST.length}`,
-  },
-  { field: 'userCount', header: 'Users' },
-];
-
-// "All institutes": who owns the role (unit name) and where it is used
-const ownerColumn = {
-  field: 'ownerName',
-  header: 'Institute / unit',
-  render: (role) => (
-    <InstituteBadges
-      caption={role.ownerType === OWNER_TYPES.UNIT ? role.ownerName : undefined}
-      shortCodes={role.usedIn}
-    />
-  ),
-};
-// One institute of a unit selected: where each of the unit's roles is used
-const usedInColumn = {
-  field: 'usedIn',
-  header: 'Used in',
-  render: (role) => <InstituteBadges shortCodes={role.usedIn} />,
-};
-
-const NEW_ROLE = {
-  ownerInstituteId: '', // an institute of the owner (the selected one, or chosen in "All")
-  template: '',
+const EMPTY_FORM = {
+  ownerInstituteId: '',
   name: '',
   description: '',
   permissions: [],
-  instituteIds: [], // unit roles: the member institutes that use the role
+  instituteIds: [],
 };
-
-// "Used in" tick boxes, shown only when the role belongs to a unit.
-// membersOf(instituteId) -> the institutes of that institute's unit ([] if separate)
-function UsedInField({ membersOf, isNew }) {
-  const ownerInstituteId = useWatch({ name: 'ownerInstituteId' });
-  const { setValue } = useFormContext();
-  const members = membersOf(ownerInstituteId);
-  const memberKey = members.map((m) => m.id).join();
-
-  // A new role starts used in every institute of the unit
-  useEffect(() => {
-    if (isNew) setValue('instituteIds', memberKey ? memberKey.split(',') : []);
-  }, [isNew, memberKey, setValue]);
-
-  if (members.length < 2) return null;
-  return (
-    <FormCheckboxGroup
-      name="instituteIds"
-      label="Used in"
-      helperText="Staff with this role can open only the ticked institutes"
-      groups={[
-        {
-          label: 'Institutes of the unit',
-          permissions: members.map((m) => ({ value: m.id, label: `${m.shortCode} · ${m.name}` })),
-        },
-      ]}
-      rules={{ validate: (value) => value.length > 0 || 'Tick at least one institute' }}
-    />
-  );
-}
-
-// "Start from a built-in role": fills name, description and permissions, which can then be changed.
-// grantable: the permissions this admin may hand out (others are left unticked).
-function TemplatePicker({ grantable }) {
-  const [templates, setTemplates] = useState([]);
-  const { setValue } = useFormContext();
-  const template = useWatch({ name: 'template' });
-  const notify = useNotify();
-
-  useEffect(() => {
-    rolesApi.templates().then(setTemplates).catch(notify.error);
-  }, [notify]);
-
-  useEffect(() => {
-    const chosen = templates.find((t) => t.name === template);
-    if (!chosen) return;
-    setValue('name', chosen.name);
-    setValue('description', chosen.description);
-    setValue(
-      'permissions',
-      chosen.permissions.filter((p) => grantable.includes(p)),
-    );
-  }, [template, templates, grantable, setValue]);
-
-  return (
-    <FormSelect
-      name="template"
-      label="Start from a built-in role (optional)"
-      options={[
-        { value: '', label: 'Start empty' },
-        ...templates.map((t) => ({ value: t.name, label: t.name })),
-      ]}
-      helperText="Fills the form below; change anything before saving"
-    />
-  );
-}
 
 export default function RolesPage() {
   const notify = useNotify();
+
   const { selectedInstitute, permissions, isSuperAdmin, allInstitutes, owners, realInstitutes } =
     useAuth();
-  const list = useList(rolesApi.list, { sort: 'name' });
+
+  const list = useList(rolesApi.list, {
+    sort: 'name',
+    limit: 100,
+  });
+
   const createRequest = useRequest(rolesApi.create);
   const updateRequest = useRequest(rolesApi.update);
   const removeRequest = useRequest(rolesApi.remove);
-  const [editing, setEditing] = useState(null);
+
+  const [selectedRoleId, setSelectedRoleId] = useState(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [activeTab, setActiveTab] = useState('all');
+  const [formState, setFormState] = useState(EMPTY_FORM);
+  const [formDirty, setFormDirty] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [template, setTemplate] = useState('');
 
-  // An admin can only hand out permissions they have themselves (the server checks this too)
-  const groups = isSuperAdmin
-    ? PERMISSION_GROUPS
-    : PERMISSION_GROUPS.map((g) => ({
-        ...g,
-        permissions: g.permissions.filter((p) => permissions.includes(p.value)),
-      })).filter((g) => g.permissions.length > 0);
+  const saving = createRequest.loading || updateRequest.loading;
 
-  const grantable = isSuperAdmin ? PERMISSION_LIST : permissions;
+  const grantable = useMemo(
+    () => (isSuperAdmin ? PERMISSION_LIST : permissions),
+    [isSuperAdmin, permissions],
+  );
 
-  const owner = selectedInstitute?.unit
-    ? `${selectedInstitute.unit.name} (shared by its institutes)`
-    : selectedInstitute?.name;
+  const groups = useMemo(
+    () =>
+      isSuperAdmin
+        ? PERMISSION_GROUPS
+        : PERMISSION_GROUPS.map((group) => ({
+            ...group,
+            permissions: group.permissions.filter((item) => grantable.includes(item.value)),
+          })).filter((group) => group.permissions.length > 0),
+    [isSuperAdmin, grantable],
+  );
 
-  // The institutes of the unit that this institute belongs to ([] for a separate institute)
   const membersOf = (instituteId) => {
-    const unitId = realInstitutes.find((i) => i.id === String(instituteId))?.unit?.id;
-    return unitId ? realInstitutes.filter((i) => i.unit?.id === unitId) : [];
-  };
-  const unitSelected = Boolean(selectedInstitute?.unit);
+    const institute = realInstitutes.find((item) => String(item.id) === String(instituteId));
 
-  const formValues = (role) => {
-    const members = membersOf(role.ownerInstituteId).map((m) => m.id);
-    return {
-      ownerInstituteId: role.ownerInstituteId,
-      name: role.name,
-      description: role.description,
-      permissions: role.permissions,
-      instituteIds: role.instituteIds?.length ? role.instituteIds.map(String) : members,
-    };
+    const unitId = institute?.unit?.id;
+
+    if (!unitId) return [];
+
+    return realInstitutes.filter((item) => String(item.unit?.id) === String(unitId));
   };
 
-  // Every change goes to the role's own institute / unit (needed in the "All institutes" view)
-  const handleSave = async ({ ownerInstituteId, template: _template, instituteIds, ...values }) => {
-    const data = membersOf(ownerInstituteId).length > 1 ? { ...values, instituteIds } : values;
-    if (editing._id) {
-      await updateRequest.run(editing._id, data, editing.ownerInstituteId);
-      notify.success('Role updated');
-    } else {
-      await createRequest.run(data, ownerInstituteId);
-      notify.success('Role added');
+  const formValues = (role) => ({
+    ownerInstituteId: role.ownerInstituteId ?? '',
+    name: role.name ?? '',
+    description: role.description ?? '',
+    permissions: role.permissions ?? [],
+    instituteIds:
+      role.instituteIds?.length > 0
+        ? role.instituteIds.map(String)
+        : membersOf(role.ownerInstituteId).map((item) => String(item.id)),
+  });
+
+  const tabs = useMemo(() => {
+    if (!allInstitutes) return [];
+
+    const instituteTabs = realInstitutes.map((institute) => ({
+      id: `institute-${institute.id}`,
+      label: institute.shortCode,
+      description: institute.name,
+      instituteId: String(institute.id),
+      type: OWNER_TYPES.INSTITUTE,
+    }));
+
+    const units = [
+      ...new Map(
+        realInstitutes
+          .filter((item) => item.unit?.id)
+          .map((item) => [String(item.unit.id), item.unit]),
+      ).values(),
+    ];
+
+    const unitTabs = units.map((unit) => ({
+      id: `unit-${unit.id}`,
+      label: unit.name,
+      description: 'Shared unit roles',
+      unitId: String(unit.id),
+      type: OWNER_TYPES.UNIT,
+    }));
+
+    return [
+      ...instituteTabs,
+      ...(unitTabs.length > 0
+        ? unitTabs
+        : [
+            {
+              id: 'unit-not-set',
+              label: 'Unit · not set up',
+              description: 'Institutes can be combined into a unit',
+              type: OWNER_TYPES.UNIT,
+              disabled: true,
+            },
+          ]),
+    ];
+  }, [allInstitutes, realInstitutes]);
+
+  const currentTab = tabs.find((item) => item.id === activeTab);
+
+  const visibleRoles = useMemo(() => {
+    if (!allInstitutes || activeTab === 'all') {
+      return list.rows;
     }
-    setEditing(null);
-    list.reload();
+
+    if (!currentTab) return list.rows;
+
+    if (currentTab.type === OWNER_TYPES.UNIT) {
+      if (!currentTab.unitId) return [];
+
+      return list.rows.filter((role) => {
+        if (role.ownerType !== OWNER_TYPES.UNIT) return false;
+
+        const owner = realInstitutes.find(
+          (item) => String(item.id) === String(role.ownerInstituteId),
+        );
+
+        return String(owner?.unit?.id) === currentTab.unitId;
+      });
+    }
+
+    return list.rows.filter((role) => {
+      const belongsToInstitute = String(role.ownerInstituteId) === currentTab.instituteId;
+
+      const belongsThroughUnit = role.usedIn?.includes(currentTab.label);
+
+      return belongsToInstitute || belongsThroughUnit;
+    });
+  }, [allInstitutes, activeTab, currentTab, list.rows, realInstitutes]);
+
+  // Derive the selected role from the latest list data.
+  // If the selected role is unavailable, fall back to the first visible role.
+  const selectedRole = isCreating
+    ? null
+    : (visibleRoles.find((role) => role._id === selectedRoleId) ?? visibleRoles[0] ?? null);
+
+  // Derive the saved form from the selected role until the user edits it.
+  const form = !isCreating && !formDirty && selectedRole ? formValues(selectedRole) : formState;
+
+  // Mark the form as edited whenever a form interaction updates it.
+  const setForm = (updater) => {
+    setFormState(updater);
+    setFormDirty(true);
   };
 
-  const handleDelete = async () => {
+  useEffect(() => {
+    if (!isCreating) return;
+
+    rolesApi.templates().then(setTemplates).catch(notify.error);
+  }, [isCreating, notify]);
+
+  const updateField = (field, value) => {
+    setForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const selectRole = (role) => {
+    setIsCreating(false);
+    setSelectedRoleId(role._id);
+    setFormState(formValues(role));
+    setFormDirty(false);
+    setTemplate('');
+  };
+
+  const startNewRole = () => {
+    setSelectedRoleId(null);
+    setIsCreating(true);
+    setTemplate('');
+    setFormDirty(false);
+
+    setFormState({
+      ...EMPTY_FORM,
+      ownerInstituteId: allInstitutes ? '' : String(selectedInstitute?.id ?? ''),
+    });
+  };
+
+  const cancelEditing = () => {
+    setIsCreating(false);
+    setTemplate('');
+    setFormDirty(false);
+
+    if (selectedRole) {
+      setFormState(formValues(selectedRole));
+    } else {
+      setFormState(EMPTY_FORM);
+    }
+  };
+
+  const handleTemplateChange = (value) => {
+    setTemplate(value);
+
+    const chosen = templates.find((item) => item.name === value);
+
+    if (!chosen) return;
+
+    setForm((previous) => ({
+      ...previous,
+      name: chosen.name,
+      description: chosen.description,
+      permissions: chosen.permissions.filter((item) => grantable.includes(item)),
+    }));
+  };
+
+  const handlePermissionChange = (permission, checked) => {
+    setForm((previous) => ({
+      ...previous,
+      permissions: checked
+        ? [...new Set([...previous.permissions, permission])]
+        : previous.permissions.filter((item) => item !== permission),
+    }));
+  };
+
+  const handleInstituteChange = (instituteId, checked) => {
+    setForm((previous) => ({
+      ...previous,
+      instituteIds: checked
+        ? [...new Set([...previous.instituteIds, instituteId])]
+        : previous.instituteIds.filter((id) => id !== instituteId),
+    }));
+  };
+
+  const handleOwnerChange = (ownerInstituteId) => {
+    const members = membersOf(ownerInstituteId);
+
+    setForm((previous) => ({
+      ...previous,
+      ownerInstituteId,
+      instituteIds: members.map((item) => String(item.id)),
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) {
+      notify.error('Enter the role name');
+      return;
+    }
+
+    if (form.name.trim().length < 2) {
+      notify.error('Role name must contain at least 2 characters');
+      return;
+    }
+
+    if (form.permissions.length === 0) {
+      notify.error('Select at least one permission');
+      return;
+    }
+
+    if (allInstitutes && isCreating && !form.ownerInstituteId) {
+      notify.error('Choose an institute or unit');
+      return;
+    }
+
+    const members = membersOf(form.ownerInstituteId);
+
+    if (members.length > 1 && form.instituteIds.length === 0) {
+      notify.error('Select at least one institute under Used in');
+      return;
+    }
+
+    const values = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      permissions: form.permissions,
+    };
+
+    const data = members.length > 1 ? { ...values, instituteIds: form.instituteIds } : values;
+
     try {
-      await removeRequest.run(deleting._id, deleting.ownerInstituteId);
-      notify.success('Role deleted');
-      setDeleting(null);
+      if (isCreating) {
+        await createRequest.run(data, form.ownerInstituteId);
+        notify.success('Role added successfully');
+      } else if (selectedRole) {
+        await updateRequest.run(selectedRole._id, data, selectedRole.ownerInstituteId);
+        notify.success('Role updated successfully');
+      }
+
+      setIsCreating(false);
+      setSelectedRoleId(null);
+      setFormDirty(false);
+      setTemplate('');
       list.reload();
     } catch (error) {
       notify.error(error);
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleting) return;
+
+    try {
+      await removeRequest.run(deleting._id, deleting.ownerInstituteId);
+
+      notify.success('Role deleted successfully');
+
+      setDeleting(null);
+      setSelectedRoleId(null);
+      setFormDirty(false);
+      list.reload();
+    } catch (error) {
+      notify.error(error);
+    }
+  };
+
+  const selectedMembers = membersOf(form.ownerInstituteId);
+
+  const ownerName = selectedInstitute?.unit?.name ?? selectedInstitute?.name ?? 'this institute';
+
+  const selectedTabLabel = currentTab?.label ?? ownerName;
+
   return (
-    <>
+    <Box>
       <PageHeader
-        title="Roles"
-        subtitle={
-          allInstitutes
-            ? 'Roles of every institute and unit'
-            : `Roles of ${owner ?? 'this institute'}`
-        }
-        backTo="/"
+        title="Roles and permissions"
+        subtitle="A role says what someone can do. Which institute they can do it in is set on each user."
         actions={
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEditing(NEW_ROLE)}>
-            Add role
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={<EditOutlinedIcon />}
+              onClick={() => {
+                if (selectedRole) {
+                  selectRole(selectedRole);
+                }
+              }}
+              disabled={!selectedRole || isCreating}
+            >
+              Edit role
+            </Button>
+
+            <Button variant="contained" startIcon={<AddOutlinedIcon />} onClick={startNewRole}>
+              Add role
+            </Button>
+          </Stack>
         }
       />
 
-      <DataTable
-        columns={
-          allInstitutes
-            ? [ownerColumn, ...columns]
-            : unitSelected
-              ? [...columns.slice(0, 1), usedInColumn, ...columns.slice(1)]
-              : columns
-        }
-        instituteColumn={false}
-        rows={list.rows}
-        total={list.total}
-        loading={list.loading}
-        error={list.error}
-        onRetry={list.reload}
-        params={list.params}
-        onParamsChange={list.setParams}
-        rowActions={[
-          { label: 'Edit', icon: EditOutlinedIcon, onClick: setEditing },
-          {
-            label: 'Delete',
-            icon: DeleteOutlinedIcon,
-            onClick: setDeleting,
-            color: 'error',
-            show: (role) => role.userCount === 0,
-          },
-        ]}
-        searchPlaceholder="Role name"
-        emptyText="No roles yet"
-      />
-
-      <FormDialog
-        open={Boolean(editing)}
-        title={
-          editing?._id
-            ? `Edit role: ${editing.name}${allInstitutes ? ` (${editing.ownerName})` : ''}`
-            : 'Add role'
-        }
-        defaultValues={
-          editing?._id
-            ? formValues(editing)
-            : { ...NEW_ROLE, ownerInstituteId: allInstitutes ? '' : selectedInstitute?.id }
-        }
-        submitLabel={editing?._id ? 'Save changes' : 'Add role'}
-        loading={createRequest.loading || updateRequest.loading}
-        onSubmit={handleSave}
-        onClose={() => setEditing(null)}
-      >
-        {!editing?._id && allInstitutes && (
-          <FormSelect
-            name="ownerInstituteId"
-            label="Institute / unit"
-            options={owners}
-            helperText="Institutes combined in a unit share its roles"
-            rules={{ required: 'Choose who this role is for' }}
-          />
-        )}
-        {!editing?._id && <TemplatePicker grantable={grantable} />}
-        <FormTextField
-          name="name"
-          label="Role name"
-          rules={{
-            required: 'Enter the role name',
-            minLength: { value: 2, message: 'At least 2 characters' },
+      {allInstitutes && (
+        <Box
+          sx={{
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            flexWrap: 'wrap',
           }}
-        />
-        <FormTextField name="description" label="Description" />
-        <UsedInField membersOf={membersOf} isNew={!editing?._id} />
-        <FormCheckboxGroup
-          name="permissions"
-          label="What can this role do?"
-          groups={groups}
-          rules={{ validate: (value) => value.length > 0 || 'Tick at least one permission' }}
-        />
-      </FormDialog>
+        >
+          <Typography variant="body2" fontWeight={600} color="text.secondary">
+            Roles of
+          </Typography>
+
+          {tabs.map((tab) => {
+            const count =
+              tab.type === OWNER_TYPES.UNIT
+                ? list.rows.filter((role) => role.ownerType === OWNER_TYPES.UNIT).length
+                : list.rows.filter(
+                    (role) =>
+                      String(role.ownerInstituteId) === tab.instituteId ||
+                      role.usedIn?.includes(tab.label),
+                  ).length;
+
+            return (
+              <Button
+                key={tab.id}
+                size="small"
+                disabled={tab.disabled}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setSelectedRoleId(null);
+                  setFormDirty(false);
+                  setIsCreating(false);
+                }}
+                variant={activeTab === tab.id ? 'contained' : 'outlined'}
+                sx={{
+                  borderRadius: 5,
+                  minHeight: 34,
+                  ...(activeTab === tab.id && {
+                    backgroundColor: '#e9edff',
+                    color: '#294dbb',
+                    '&:hover': {
+                      backgroundColor: '#dfe6ff',
+                    },
+                  }),
+                }}
+              >
+                {tab.label}
+                {!tab.disabled && ` · ${count} roles`}
+              </Button>
+            );
+          })}
+        </Box>
+      )}
+
+      {allInstitutes && currentTab?.type === OWNER_TYPES.INSTITUTE && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          These roles belong to {currentTab.label} only. Changes here do not affect other
+          institutes. To share roles, combine the institutes into a unit.
+        </Alert>
+      )}
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            md: '230px minmax(0, 1fr)',
+          },
+          gap: 1.5,
+          alignItems: 'start',
+        }}
+      >
+        <Paper
+          variant="outlined"
+          sx={{
+            overflow: 'hidden',
+            borderRadius: 2,
+          }}
+        >
+          <Box sx={{ px: 2, py: 1.5 }}>
+            <Typography fontWeight={700}>{allInstitutes ? selectedTabLabel : ownerName}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {visibleRoles.length} roles
+            </Typography>
+          </Box>
+
+          <Divider />
+
+          {list.loading ? (
+            <Box sx={{ p: 3, textAlign: 'center' }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : list.error ? (
+            <Box sx={{ p: 2 }}>
+              <Alert
+                severity="error"
+                action={
+                  <Button color="inherit" size="small" onClick={list.reload}>
+                    Retry
+                  </Button>
+                }
+              >
+                Could not load roles.
+              </Alert>
+            </Box>
+          ) : visibleRoles.length === 0 ? (
+            <Box sx={{ p: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                No roles found for this selection.
+              </Typography>
+            </Box>
+          ) : (
+            <Stack spacing={0.5} sx={{ p: 0.75 }}>
+              {visibleRoles.map((role) => (
+                <Button
+                  key={role._id}
+                  onClick={() => selectRole(role)}
+                  fullWidth
+                  sx={{
+                    justifyContent: 'space-between',
+                    textAlign: 'left',
+                    px: 1.25,
+                    py: 1.1,
+                    borderRadius: 1.5,
+                    color:
+                      selectedRole?._id === role._id && !isCreating ? '#294dbb' : 'text.primary',
+                    backgroundColor:
+                      selectedRole?._id === role._id && !isCreating ? '#eef1ff' : 'transparent',
+                    '&:hover': {
+                      backgroundColor: '#f3f5ff',
+                    },
+                  }}
+                >
+                  <Typography variant="body2" fontWeight={600} sx={{ textTransform: 'none' }}>
+                    {role.name}
+                  </Typography>
+
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ flexShrink: 0, ml: 1 }}
+                  >
+                    {role.userCount ?? 0} users
+                  </Typography>
+                </Button>
+              ))}
+            </Stack>
+          )}
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            borderRadius: 2,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}
+        >
+          {isCreating || selectedRole ? (
+            <>
+              <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  {allInstitutes && isCreating && (
+                    <TextField
+                      select
+                      label="Institute / unit"
+                      value={form.ownerInstituteId}
+                      onChange={(event) => handleOwnerChange(event.target.value)}
+                      sx={{ flex: 1 }}
+                    >
+                      {owners.map((owner) => (
+                        <MenuItem key={owner.value} value={owner.value}>
+                          {owner.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+
+                  <TextField
+                    label="Role name"
+                    value={form.name}
+                    onChange={(event) => updateField('name', event.target.value)}
+                    sx={{ flex: 1 }}
+                    required
+                  />
+
+                  <TextField
+                    label="What this role is for"
+                    value={form.description}
+                    onChange={(event) => updateField('description', event.target.value)}
+                    sx={{ flex: 1 }}
+                  />
+                </Stack>
+
+                {isCreating && templates.length > 0 && (
+                  <TextField
+                    select
+                    label="Start from a built-in role (optional)"
+                    value={template}
+                    onChange={(event) => handleTemplateChange(event.target.value)}
+                    sx={{ mt: 2, maxWidth: 420 }}
+                  >
+                    <MenuItem value="">Start empty</MenuItem>
+                    {templates.map((item) => (
+                      <MenuItem key={item.name} value={item.name}>
+                        {item.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                )}
+
+                {selectedMembers.length > 1 && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+                      Used in
+                    </Typography>
+
+                    <Typography variant="caption" color="text.secondary">
+                      Staff with this role can open only the selected institutes.
+                    </Typography>
+
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                      {selectedMembers.map((member) => (
+                        <FormControlLabel
+                          key={member.id}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={form.instituteIds.includes(String(member.id))}
+                              onChange={(event) =>
+                                handleInstituteChange(String(member.id), event.target.checked)
+                              }
+                            />
+                          }
+                          label={`${member.shortCode} · ${member.name}`}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+              </Box>
+
+              <Divider />
+
+              <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 2 }}>
+                <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+                  Permissions
+                </Typography>
+
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Select what this role is allowed to do. Only permissions available to you can be
+                  assigned.
+                </Typography>
+
+                {groups.length === 0 ? (
+                  <Alert severity="warning">
+                    You do not have permission to assign any permissions.
+                  </Alert>
+                ) : (
+                  <TableContainer
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1.5,
+                    }}
+                  >
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ backgroundColor: '#f8f9fc' }}>
+                          <TableCell width="30%">AREA</TableCell>
+                          <TableCell>PERMISSION</TableCell>
+                          <TableCell align="center" width={110}>
+                            ALLOW
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+
+                      <TableBody>
+                        {groups.map((group) =>
+                          group.permissions.map((permission, index) => (
+                            <TableRow key={permission.value} hover>
+                              {index === 0 && (
+                                <TableCell
+                                  rowSpan={group.permissions.length}
+                                  sx={{
+                                    verticalAlign: 'top',
+                                    fontWeight: 700,
+                                    backgroundColor: '#fcfcfe',
+                                  }}
+                                >
+                                  {group.label}
+                                </TableCell>
+                              )}
+
+                              <TableCell>{permission.label}</TableCell>
+
+                              <TableCell align="center">
+                                <Checkbox
+                                  size="small"
+                                  checked={form.permissions.includes(permission.value)}
+                                  onChange={(event) =>
+                                    handlePermissionChange(permission.value, event.target.checked)
+                                  }
+                                  inputProps={{
+                                    'aria-label': permission.label,
+                                  }}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )),
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+
+              <Divider />
+
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                alignItems={{ sm: 'center' }}
+                justifyContent="space-between"
+                sx={{ p: 2 }}
+              >
+                <Typography variant="caption" color="text.secondary">
+                  {isCreating ? 'New role' : `Used by ${selectedRole?.userCount ?? 0} user(s)`}
+                  {' · '}
+                  {form.permissions.length} permissions selected
+                </Typography>
+
+                <Stack direction="row" spacing={1} justifyContent="flex-end">
+                  {!isCreating && selectedRole?.userCount === 0 && (
+                    <Button
+                      color="error"
+                      variant="outlined"
+                      startIcon={<DeleteOutlinedIcon />}
+                      onClick={() => setDeleting(selectedRole)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="outlined"
+                    startIcon={<CloseOutlinedIcon />}
+                    onClick={cancelEditing}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </Button>
+
+                  <Button
+                    variant="contained"
+                    startIcon={<SaveOutlinedIcon />}
+                    onClick={handleSave}
+                    disabled={saving}
+                  >
+                    {saving ? 'Saving...' : isCreating ? 'Add role' : 'Save role'}
+                  </Button>
+                </Stack>
+              </Stack>
+            </>
+          ) : (
+            <Box sx={{ p: 5, textAlign: 'center' }}>
+              <Typography variant="h6" fontWeight={700}>
+                Select a role
+              </Typography>
+              <Typography color="text.secondary" sx={{ mt: 1 }}>
+                Choose a role from the list or add a new role.
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<AddOutlinedIcon />}
+                onClick={startNewRole}
+                sx={{ mt: 2 }}
+              >
+                Add role
+              </Button>
+            </Box>
+          )}
+        </Paper>
+      </Box>
 
       <ConfirmDialog
         open={Boolean(deleting)}
@@ -301,6 +785,6 @@ export default function RolesPage() {
         onConfirm={handleDelete}
         onClose={() => setDeleting(null)}
       />
-    </>
+    </Box>
   );
 }

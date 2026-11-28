@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import { Alert, Box, Button, CircularProgress, Paper, Tab, Tabs, Typography } from '@mui/material';
-
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
+import { Alert, Box, Button, CircularProgress, Paper, Tab, Tabs } from '@mui/material';
 
 import PageHeader from '@/components/PageHeader';
 import FormDialog from '@/components/FormDialog';
@@ -18,12 +15,12 @@ import { studentsApi } from '@/api/students';
 import { coursesApi } from '@/api/courses';
 
 import { useRequest } from '@/hooks/useRequest';
-import { useList } from '@/hooks/useList';
 import { useAuth } from '@/hooks/useAuth';
 import { useNotify } from '@/hooks/useNotify';
 
 import { GENDER_LIST } from '@/constants/genders';
 import { CATEGORY_LIST } from '@/constants/categories';
+import { PERMISSIONS } from '@/constants/permissions';
 
 import StudentProfileHeader from './components/StudentProfileHeader';
 import StudentResultsTab from './components/StudentResultsTab';
@@ -31,6 +28,10 @@ import StudentDocumentsTab from './components/StudentDocumentsTab';
 import StudentClearanceTab from './components/StudentClearanceTab';
 import StudentTCTab from './components/StudentTCTab';
 import StudentHistoryTab from './components/StudentHistoryTab';
+
+const MAX_PHOTO_SIZE = 2 * 1024 * 1024;
+
+const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 const genderOptions = GENDER_LIST.map((value) => ({
   value,
@@ -66,13 +67,21 @@ const StudentProfilePage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const { selectedInstitute, allInstitutes } = useAuth();
+  const { selectedInstitute, can } = useAuth();
   const notify = useNotify();
+
+  const canReadStudent = can(PERMISSIONS.STUDENT_READ);
+  const canWriteStudent = can(PERMISSIONS.STUDENT_WRITE);
+  const canIssueHandover = can(PERMISSIONS.HANDOVER_ISSUE);
 
   const [activeTab, setActiveTab] = useState(0);
   const [student, setStudent] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const [courses, setCourses] = useState([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
+  const [coursesError, setCoursesError] = useState(null);
 
   const { run: getStudent, loading, error } = useRequest(studentsApi.getById);
 
@@ -80,16 +89,9 @@ const StudentProfilePage = () => {
 
   const { run: deleteStudent, loading: deleteLoading } = useRequest(studentsApi.remove);
 
-  const {
-    rows: courses,
-    loading: coursesLoading,
-    error: coursesError,
-  } = useList(coursesApi.list, { sort: 'name' });
+  const { run: uploadPhoto, loading: photoUploading } = useRequest(studentsApi.uploadPhoto);
 
-  const courseOptions = courses.map((course) => ({
-    value: course._id,
-    label: `${course.name} (${course.shortCode})`,
-  }));
+  const instituteId = student?.instituteId?._id || student?.instituteId || selectedInstitute?.id;
 
   const loadStudent = async () => {
     const data = await getStudent(id);
@@ -117,9 +119,63 @@ const StudentProfilePage = () => {
     };
   }, [id, getStudent]);
 
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCourses = async () => {
+      if (!instituteId) {
+        setCourses([]);
+        return;
+      }
+
+      setCoursesLoading(true);
+      setCoursesError(null);
+
+      try {
+        const result = await coursesApi.list(
+          {
+            page: 1,
+            limit: 100,
+            sort: 'name',
+          },
+          instituteId,
+        );
+
+        if (isActive) {
+          setCourses(Array.isArray(result) ? result : []);
+        }
+      } catch (loadError) {
+        if (isActive) {
+          setCourses([]);
+          setCoursesError(loadError);
+        }
+      } finally {
+        if (isActive) {
+          setCoursesLoading(false);
+        }
+      }
+    };
+
+    loadCourses();
+
+    return () => {
+      isActive = false;
+    };
+  }, [instituteId]);
+
+  const courseOptions = courses.map((course) => ({
+    value: course._id,
+    label: `${course.name} (${course.shortCode || '—'})`,
+  }));
+
   const handleEdit = async (values) => {
-    if (allInstitutes || !selectedInstitute?.id) {
-      notify.error('Please select one institute first');
+    if (!canWriteStudent) {
+      notify.error('You do not have permission to edit students');
+      return;
+    }
+
+    if (!instituteId) {
+      notify.error('Student institute information is unavailable');
       return;
     }
 
@@ -143,29 +199,82 @@ const StudentProfilePage = () => {
       batch: values.batch,
     };
 
-    await updateStudent(id, payload, selectedInstitute.id);
+    try {
+      await updateStudent(id, payload, instituteId);
+      await loadStudent();
 
-    await loadStudent();
-
-    setEditOpen(false);
-    notify.success('Student details updated successfully');
+      setEditOpen(false);
+      notify.success('Student details updated successfully');
+    } catch (updateError) {
+      notify.error(updateError?.message || 'Unable to update student details');
+    }
   };
 
   const handleDelete = async () => {
-    if (allInstitutes || !selectedInstitute?.id) {
-      notify.error('Please select one institute first');
+    if (!canWriteStudent) {
+      notify.error('You do not have permission to delete students');
       return;
     }
 
-    await deleteStudent(id, selectedInstitute.id);
+    if (!instituteId) {
+      notify.error('Student institute information is unavailable');
+      return;
+    }
 
-    setDeleteOpen(false);
-    notify.success('Student deleted successfully');
-    navigate('/students');
+    try {
+      await deleteStudent(id, instituteId);
+
+      setDeleteOpen(false);
+      notify.success('Student deleted successfully');
+      navigate('/students');
+    } catch (deleteError) {
+      notify.error(deleteError?.message || 'Unable to delete student');
+    }
+  };
+
+  const handlePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+
+    event.target.value = '';
+
+    if (!file) return;
+
+    if (!canWriteStudent) {
+      notify.error('You do not have permission to upload student photos');
+      return;
+    }
+
+    if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
+      notify.error('Only JPG, PNG and WEBP images are allowed');
+      return;
+    }
+
+    if (file.size > MAX_PHOTO_SIZE) {
+      notify.error('Photo size must be 2 MB or smaller');
+      return;
+    }
+
+    if (!instituteId) {
+      notify.error('Student institute information is unavailable');
+      return;
+    }
+
+    try {
+      await uploadPhoto(student._id, file, instituteId);
+      await loadStudent();
+
+      notify.success('Student photo uploaded successfully');
+    } catch (uploadError) {
+      notify.error(uploadError?.message || 'Unable to upload student photo');
+    }
   };
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
+  };
+
+  const handleMobileInput = (event) => {
+    event.target.value = event.target.value.replace(/\D/g, '').slice(0, 10);
   };
 
   const tabs = ['Results', 'Documents', 'Clearance', 'TC', 'History'];
@@ -190,6 +299,22 @@ const StudentProfilePage = () => {
     batch: student?.batch ?? '',
   };
 
+  if (!canReadStudent) {
+    return (
+      <Box>
+        <PageHeader
+          title="Student Profile"
+          subtitle="View and manage student information"
+          backTo="/students"
+        />
+
+        <Alert severity="error" sx={{ mt: 3 }}>
+          You do not have permission to view student profiles.
+        </Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <PageHeader
@@ -197,8 +322,15 @@ const StudentProfilePage = () => {
         subtitle="View and manage student information"
         backTo="/students"
       />
+
       {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            py: 6,
+          }}
+        >
           <CircularProgress />
         </Box>
       )}
@@ -224,41 +356,17 @@ const StudentProfilePage = () => {
       {!loading && !error && student && (
         <>
           <Box sx={{ mt: 3 }}>
-            <StudentProfileHeader student={student} onPhotoUploaded={loadStudent} />
+            <StudentProfileHeader
+              student={student}
+              courses={courses}
+              canWrite={canWriteStudent && Boolean(instituteId)}
+              photoUploading={photoUploading}
+              onPhotoChange={handlePhotoChange}
+              onEdit={() => setEditOpen(true)}
+              onStartTC={() => setActiveTab(3)}
+              onDelete={() => setDeleteOpen(true)}
+            />
           </Box>
-
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 1,
-              mt: 2,
-              flexWrap: 'wrap',
-            }}
-          >
-            <Button
-              variant="contained"
-              startIcon={<EditOutlinedIcon />}
-              onClick={() => setEditOpen(true)}
-              disabled={allInstitutes || !selectedInstitute?.id}
-            >
-              Edit Student
-            </Button>
-
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteOutlinedIcon />}
-              onClick={() => setDeleteOpen(true)}
-              disabled={allInstitutes || !selectedInstitute?.id}
-            >
-              Delete Student
-            </Button>
-          </Box>
-
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            Student ID: {id}
-          </Typography>
 
           <Paper sx={{ mt: 3 }}>
             <Tabs
@@ -273,137 +381,164 @@ const StudentProfilePage = () => {
               ))}
             </Tabs>
 
-            <Box sx={{ p: 3 }}>
-              {activeTab === 0 && <StudentResultsTab />}
-              {activeTab === 1 && <StudentDocumentsTab />}
+            <Box sx={{ p: { xs: 2, sm: 3 } }}>
+              {activeTab === 0 && <StudentResultsTab studentId={id} />}
+
+              {activeTab === 1 && (
+                <StudentDocumentsTab
+                  studentId={student._id}
+                  student={student}
+                  instituteId={instituteId}
+                  canIssueHandover={canIssueHandover}
+                />
+              )}
+
               {activeTab === 2 && <StudentClearanceTab studentId={id} />}
-              {activeTab === 3 && <StudentTCTab />}
-              {activeTab === 4 && <StudentHistoryTab />}
+
+              {activeTab === 3 && <StudentTCTab studentId={id} />}
+
+              {activeTab === 4 && <StudentHistoryTab studentId={id} />}
             </Box>
           </Paper>
 
-          <FormDialog
-            open={editOpen}
-            onClose={() => setEditOpen(false)}
-            title="Edit Student"
-            defaultValues={editDefaults}
-            onSubmit={handleEdit}
-            loading={updateLoading}
-            submitLabel="Update Student"
-          >
-            <FormTextField
-              name="scholarNo"
-              label="Scholar Number"
-              rules={{ required: 'Scholar number is required' }}
-              fullWidth
-            />
+          {canWriteStudent && (
+            <>
+              <FormDialog
+                open={editOpen}
+                onClose={() => setEditOpen(false)}
+                title="Edit Student"
+                defaultValues={editDefaults}
+                onSubmit={handleEdit}
+                loading={updateLoading}
+                submitLabel="Update Student"
+              >
+                <FormTextField
+                  name="scholarNo"
+                  label="Scholar Number"
+                  rules={{ required: 'Scholar number is required' }}
+                  fullWidth
+                />
 
-            <FormTextField name="enrollmentNo" label="Enrollment Number" fullWidth />
+                <FormTextField name="enrollmentNo" label="Enrollment Number" fullWidth />
 
-            <FormTextField name="rollNo" label="Roll Number" fullWidth />
+                <FormTextField name="rollNo" label="Roll Number" fullWidth />
 
-            <FormTextField
-              name="name"
-              label="Student Name"
-              rules={{
-                required: 'Student name is required',
-                validate: validatePersonName,
-              }}
-              fullWidth
-            />
+                <FormTextField
+                  name="name"
+                  label="Student Name"
+                  rules={{
+                    required: 'Student name is required',
+                    validate: validatePersonName,
+                  }}
+                  fullWidth
+                />
 
-            <FormTextField
-              name="fatherName"
-              label="Father's Name"
-              rules={{
-                required: "Father's name is required",
-                validate: validatePersonName,
-              }}
-              fullWidth
-            />
+                <FormTextField
+                  name="fatherName"
+                  label="Father's Name"
+                  rules={{
+                    required: "Father's name is required",
+                    validate: validatePersonName,
+                  }}
+                  fullWidth
+                />
 
-            <FormTextField name="motherName" label="Mother's Name" fullWidth />
+                <FormTextField name="motherName" label="Mother's Name" fullWidth />
 
-            <FormDateField
-              name="dob"
-              label="Date of Birth"
-              rules={{ required: 'Date of birth is required' }}
-              disableFuture
-              slotProps={{ textField: { fullWidth: true } }}
-            />
+                <FormDateField
+                  name="dob"
+                  label="Date of Birth"
+                  rules={{ required: 'Date of birth is required' }}
+                  disableFuture
+                  slotProps={{ textField: { fullWidth: true } }}
+                />
 
-            <FormSelect
-              name="gender"
-              label="Gender"
-              options={genderOptions}
-              rules={{ required: 'Please select gender' }}
-              fullWidth
-            />
+                <FormSelect
+                  name="gender"
+                  label="Gender"
+                  options={genderOptions}
+                  rules={{ required: 'Please select gender' }}
+                  fullWidth
+                />
 
-            <FormSelect
-              name="category"
-              label="Category"
-              options={categoryOptions}
-              rules={{ required: 'Please select category' }}
-              fullWidth
-            />
+                <FormSelect
+                  name="category"
+                  label="Category"
+                  options={categoryOptions}
+                  rules={{ required: 'Please select category' }}
+                  fullWidth
+                />
 
-            <FormDateField
-              name="admissionDate"
-              label="Admission Date"
-              rules={{
-                required: 'Admission date is required',
-                validate: validateAdmissionDate,
-                deps: ['dob'],
-              }}
-              disableFuture
-              slotProps={{ textField: { fullWidth: true } }}
-            />
+                <FormDateField
+                  name="admissionDate"
+                  label="Admission Date"
+                  rules={{
+                    required: 'Admission date is required',
+                    validate: validateAdmissionDate,
+                    deps: ['dob'],
+                  }}
+                  disableFuture
+                  slotProps={{ textField: { fullWidth: true } }}
+                />
 
-            <FormTextField
-              name="mobile"
-              label="Mobile Number"
-              type="tel"
-              rules={{
-                required: 'Mobile number is required',
-                validate: validateMobile,
-              }}
-              fullWidth
-            />
+                <FormTextField
+                  name="mobile"
+                  label="Mobile Number"
+                  type="tel"
+                  onInput={handleMobileInput}
+                  slotProps={{
+                    htmlInput: {
+                      maxLength: 10,
+                      inputMode: 'numeric',
+                      pattern: '[0-9]*',
+                    },
+                  }}
+                  rules={{
+                    required: 'Mobile number is required',
+                    validate: validateMobile,
+                  }}
+                  fullWidth
+                />
 
-            <FormTextField name="religion" label="Religion" fullWidth />
+                <FormTextField name="religion" label="Religion" fullWidth />
 
-            <FormTextField name="address" label="Address" multiline rows={3} fullWidth />
+                <FormTextField name="address" label="Address" multiline rows={3} fullWidth />
 
-            <FormTextField name="previousSchool" label="Previous School" fullWidth />
+                <FormTextField name="previousSchool" label="Previous School" fullWidth />
 
-            <FormSelect
-              name="courseId"
-              label="Course"
-              options={courseOptions}
-              rules={{ required: 'Please select a course' }}
-              disabled={coursesLoading || Boolean(coursesError) || !courseOptions.length}
-              helperText={
-                coursesError ? 'Unable to load courses' : coursesLoading ? 'Loading courses...' : ''
-              }
-              fullWidth
-            />
+                <FormSelect
+                  name="courseId"
+                  label="Course"
+                  options={courseOptions}
+                  rules={{ required: 'Please select a course' }}
+                  disabled={coursesLoading || Boolean(coursesError) || !courseOptions.length}
+                  helperText={
+                    coursesError
+                      ? 'Unable to load courses'
+                      : coursesLoading
+                        ? 'Loading courses...'
+                        : ''
+                  }
+                  fullWidth
+                />
 
-            <FormTextField name="branch" label="Branch" fullWidth />
+                <FormTextField name="branch" label="Branch" fullWidth />
 
-            <FormTextField name="batch" label="Batch" fullWidth />
-          </FormDialog>
+                <FormTextField name="batch" label="Batch" fullWidth />
+              </FormDialog>
 
-          <ConfirmDialog
-            open={deleteOpen}
-            title="Delete Student?"
-            message={`Are you sure you want to delete ${student.name}? This student will be moved to deleted records.`}
-            confirmLabel="Delete Student"
-            danger
-            loading={deleteLoading}
-            onConfirm={handleDelete}
-            onClose={() => setDeleteOpen(false)}
-          />
+              <ConfirmDialog
+                open={deleteOpen}
+                title="Delete Student?"
+                message={`Are you sure you want to delete ${student.name}? This student will be moved to deleted records.`}
+                confirmLabel="Delete Student"
+                danger
+                loading={deleteLoading}
+                onConfirm={handleDelete}
+                onClose={() => setDeleteOpen(false)}
+              />
+            </>
+          )}
         </>
       )}
 

@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
+  Alert,
   Box,
-  Paper,
-  Typography,
-  Chip,
   Button,
-  Stack,
+  Chip,
+  CircularProgress,
   Divider,
   Grid,
-  Alert,
-  CircularProgress,
+  Paper,
+  Stack,
+  Typography,
 } from '@mui/material';
 
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
@@ -46,42 +46,56 @@ const StudentClearanceTab = ({ studentId }) => {
 
   const { run: getClearance, loading, error } = useRequest(clearanceApi.getStudentClearance);
 
+  const loadClearance = useCallback(async () => {
+    if (!studentId) return;
+
+    const data = await getClearance(studentId);
+    setClearance(data);
+  }, [studentId, getClearance]);
+
   useEffect(() => {
     let isActive = true;
 
-    const timer = setTimeout(() => {
-      setClearance(null);
+    if (!studentId) {
+      return () => {
+        isActive = false;
+      };
+    }
 
-      if (!studentId) return;
-
-      getClearance(studentId)
-        .then((data) => {
-          if (isActive) {
-            setClearance(data);
-          }
-        })
-        .catch(() => {
-          if (isActive) {
-            setClearance(null);
-          }
-        });
-    }, 0);
+    getClearance(studentId)
+      .then((data) => {
+        if (isActive) {
+          setClearance(data);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setClearance(null);
+        }
+      });
 
     return () => {
       isActive = false;
-      clearTimeout(timer);
     };
   }, [studentId, getClearance]);
 
-  const handleRetry = () => {
-    getClearance(studentId)
-      .then(setClearance)
-      .catch(() => setClearance(null));
+  const handleRetry = async () => {
+    try {
+      await loadClearance();
+    } catch {
+      // The request hook exposes the error state.
+    }
   };
 
   if (loading && !clearance) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          py: 6,
+        }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -111,10 +125,13 @@ const StudentClearanceTab = ({ studentId }) => {
     return <Alert severity="info">No clearance information available.</Alert>;
   }
 
-  const applications = clearance.applications || [];
+  const applications = Array.isArray(clearance.applications) ? clearance.applications : [];
+
   const latestApplication = applications[0];
 
-  const departmentStatuses = latestApplication?.departmentWiseStatus || [];
+  const departmentStatuses = Array.isArray(latestApplication?.departmentWiseStatus)
+    ? latestApplication.departmentWiseStatus
+    : [];
 
   const clearedCount = departmentStatuses.filter((item) => item.status === 'CLEAR').length;
 
@@ -126,12 +143,11 @@ const StudentClearanceTab = ({ studentId }) => {
 
   return (
     <Box>
-      {/* Header */}
       <Box
         display="flex"
         justifyContent="space-between"
-        alignItems="center"
-        flexWrap="wrap"
+        alignItems={{ xs: 'flex-start', sm: 'center' }}
+        flexDirection={{ xs: 'column', sm: 'row' }}
         gap={2}
         sx={{ mb: 3 }}
       >
@@ -152,7 +168,7 @@ const StudentClearanceTab = ({ studentId }) => {
           onClick={handleRetry}
           disabled={loading}
         >
-          Refresh
+          {loading ? 'Refreshing...' : 'Refresh'}
         </Button>
       </Box>
 
@@ -162,10 +178,22 @@ const StudentClearanceTab = ({ studentId }) => {
         </Alert>
       )}
 
-      {/* No Application */}
       {!latestApplication ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-          <DescriptionOutlinedIcon sx={{ fontSize: 42, color: 'text.secondary', mb: 1 }} />
+        <Paper
+          variant="outlined"
+          sx={{
+            p: { xs: 3, sm: 4 },
+            textAlign: 'center',
+            borderRadius: 2,
+          }}
+        >
+          <DescriptionOutlinedIcon
+            sx={{
+              fontSize: 44,
+              color: 'text.secondary',
+              mb: 1,
+            }}
+          />
 
           <Typography variant="h6" fontWeight={600}>
             No Clearance Application Found
@@ -177,8 +205,14 @@ const StudentClearanceTab = ({ studentId }) => {
         </Paper>
       ) : (
         <>
-          {/* Overall Status */}
-          <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, mb: 3 }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2.5,
+              borderRadius: 2,
+              mb: 3,
+            }}
+          >
             <Stack
               direction="row"
               justifyContent="space-between"
@@ -200,10 +234,16 @@ const StudentClearanceTab = ({ studentId }) => {
             </Stack>
           </Paper>
 
-          {/* Summary */}
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, height: '100%' }}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2.5,
+                  borderRadius: 2,
+                  height: '100%',
+                }}
+              >
                 <Typography variant="body2" color="text.secondary">
                   Departments Cleared
                 </Typography>
@@ -219,7 +259,14 @@ const StudentClearanceTab = ({ studentId }) => {
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6 }}>
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, height: '100%' }}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2.5,
+                  borderRadius: 2,
+                  height: '100%',
+                }}
+              >
                 <Typography variant="body2" color="text.secondary">
                   Pending Departments
                 </Typography>
@@ -235,8 +282,13 @@ const StudentClearanceTab = ({ studentId }) => {
             </Grid>
           </Grid>
 
-          {/* Department-wise Status */}
-          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
             <Box sx={{ p: 2.5 }}>
               <Typography variant="subtitle1" fontWeight={700}>
                 Department-wise Status
@@ -273,8 +325,10 @@ const StudentClearanceTab = ({ studentId }) => {
                         flexWrap: 'wrap',
                       }}
                     >
-                      <Box>
-                        <Typography fontWeight={600}>{item.departmentName}</Typography>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography fontWeight={600}>
+                          {item.departmentName || 'Department'}
+                        </Typography>
 
                         <Typography variant="caption" color="text.secondary">
                           {item.remark || 'No remarks available'}
@@ -294,8 +348,14 @@ const StudentClearanceTab = ({ studentId }) => {
             )}
           </Paper>
 
-          {/* TC Information */}
-          <Paper variant="outlined" sx={{ mt: 3, p: 2.5, borderRadius: 2 }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              mt: 3,
+              p: 2.5,
+              borderRadius: 2,
+            }}
+          >
             <Box
               display="flex"
               justifyContent="space-between"

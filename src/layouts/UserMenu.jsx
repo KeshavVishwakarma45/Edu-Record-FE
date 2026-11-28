@@ -1,55 +1,100 @@
 import { useState } from 'react';
-import {
-  Avatar,
-  Box,
-  Divider,
-  IconButton,
-  ListItemIcon,
-  Menu,
-  MenuItem,
-  Typography,
-} from '@mui/material';
-import LogoutIcon from '@mui/icons-material/Logout';
+import { Avatar, Box, Divider, ListItemIcon, Menu, MenuItem, Typography } from '@mui/material';
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
+import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import { useAuth } from '@/hooks/useAuth';
 
-// Round button with the user's initials; opens name, role in this institute, and Log out.
+// Displays the signed-in user and the role active in the selected institute.
 export default function UserMenu() {
   const { user, currentRoleName, logout } = useAuth();
   const [anchor, setAnchor] = useState(null);
-  const initials = user.name
-    .split(' ')
+  const fullName = user?.name || 'User';
+  const initials = fullName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
     .map((word) => word[0])
     .slice(0, 2)
     .join('')
     .toUpperCase();
 
+  const closeMenu = () => setAnchor(null);
+
   return (
     <>
-      <IconButton
-        aria-label="Account menu"
-        aria-haspopup="true"
+      <Box
+        component="button"
+        type="button"
+        aria-label="Open account menu"
+        aria-haspopup="menu"
         onClick={(event) => setAnchor(event.currentTarget)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.75,
+          minWidth: 0,
+          p: 0.5,
+          border: 0,
+          borderRadius: 3,
+          bgcolor: 'transparent',
+          color: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
       >
-        <Avatar sx={{ width: 34, height: 34, fontSize: 14, bgcolor: 'primary.main' }}>
+        <Avatar
+          sx={{
+            width: 34,
+            height: 34,
+            bgcolor: '#E8ECFF',
+            color: '#2444A5',
+            fontWeight: 700,
+            fontSize: 16,
+          }}
+        >
           {initials}
         </Avatar>
-      </IconButton>
+        <Box sx={{ display: { xs: 'none', sm: 'block' }, minWidth: 0, maxWidth: 190 }}>
+          <Typography noWrap sx={{ fontSize: 13, fontWeight: 700, lineHeight: 1.25 }}>
+            {fullName}
+          </Typography>
+          <Typography noWrap color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>
+            {currentRoleName || 'No role'}
+          </Typography>
+        </Box>
+        <ExpandMoreRoundedIcon
+          sx={{ display: { xs: 'none', sm: 'block' }, color: 'text.secondary' }}
+        />
+      </Box>
+
       <Menu
         anchorEl={anchor}
         open={Boolean(anchor)}
-        onClose={() => setAnchor(null)}
+        onClose={closeMenu}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <Box sx={{ px: 2, py: 1 }}>
-          <Typography sx={{ fontWeight: 600 }}>{user.name}</Typography>
-          <Typography sx={{ color: 'text.secondary' }}>{currentRoleName ?? 'No role'}</Typography>
-          <Typography sx={{ color: 'text.secondary' }}>{user.email}</Typography>
+        <Box sx={{ px: 2, py: 1, minWidth: 220 }}>
+          <Typography sx={{ fontWeight: 700 }}>{fullName}</Typography>
+          <Typography color="text.secondary" variant="body2">
+            {currentRoleName || 'No role'}
+          </Typography>
+          {user?.email && (
+            <Typography color="text.secondary" variant="caption">
+              {user.email}
+            </Typography>
+          )}
         </Box>
         <Divider />
-        <MenuItem onClick={logout}>
+        <MenuItem
+          onClick={() => {
+            closeMenu();
+            logout();
+          }}
+        >
           <ListItemIcon>
-            <LogoutIcon fontSize="small" />
+            <LogoutOutlinedIcon fontSize="small" />
           </ListItemIcon>
           Log out
         </MenuItem>

@@ -53,7 +53,11 @@ export default function DataTable({
   const { allInstitutes, realInstitutes } = useAuth();
   const showInstitutes = allInstitutes && instituteColumn;
   const showFilter = allInstitutes && instituteFilter;
-  const shortCodeOf = (id) => realInstitutes.find((i) => i.id === String(id))?.shortCode ?? '—';
+  const shortCodeOf = (value) => {
+    const id = typeof value === 'object' ? value?._id || value?.id : value;
+
+    return realInstitutes.find((i) => String(i.id) === String(id))?.shortCode || '—';
+  };
   const columns = showInstitutes
     ? [
         {
